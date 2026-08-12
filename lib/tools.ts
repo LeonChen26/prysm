@@ -80,6 +80,104 @@ export const tools: AgentTool[] = [
     },
   },
   {
+    name: "append_file",
+    label: "追加写入",
+    description:
+      "在文件末尾追加内容（文件不存在则创建）。用于增量记录、日志、续写等。",
+    parameters: Type.Object({
+      path: Type.String({ description: "相对文件路径" }),
+      content: Type.String({ description: "要追加的内容" }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const file = resolveInWorkdir(params.path);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.appendFile(file, params.content, "utf-8");
+      return {
+        content: [
+          {
+            type: "text",
+            text: `已追加到 ${params.path} (${params.content.length} 字符)`,
+          },
+        ],
+        details: { path: params.path },
+      };
+    },
+  },
+  {
+    name: "create_dir",
+    label: "创建目录",
+    description: "在工作区创建目录（可一次创建多级，已存在则跳过）。",
+    parameters: Type.Object({
+      path: Type.String({ description: "相对目录路径" }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const dir = resolveInWorkdir(params.path);
+      await fs.mkdir(dir, { recursive: true });
+      return {
+        content: [{ type: "text", text: `目录已就绪: ${params.path}` }],
+        details: { path: params.path },
+      };
+    },
+  },
+  {
+    name: "move_file",
+    label: "移动/重命名",
+    description: "移动或重命名工作区内的文件或目录（自动创建目标父目录）。",
+    parameters: Type.Object({
+      from: Type.String({ description: "源相对路径（文件或目录）" }),
+      to: Type.String({ description: "目标相对路径" }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const src = resolveInWorkdir(params.from);
+      const dst = resolveInWorkdir(params.to);
+      await fs.mkdir(path.dirname(dst), { recursive: true });
+      await fs.rename(src, dst);
+      return {
+        content: [
+          { type: "text", text: `已移动/重命名: ${params.from} → ${params.to}` },
+        ],
+        details: { from: params.from, to: params.to },
+      };
+    },
+  },
+  {
+    name: "copy_file",
+    label: "复制文件",
+    description: "在工作区内复制文件（自动创建目标父目录）。",
+    parameters: Type.Object({
+      from: Type.String({ description: "源相对文件路径" }),
+      to: Type.String({ description: "目标相对文件路径" }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const src = resolveInWorkdir(params.from);
+      const dst = resolveInWorkdir(params.to);
+      await fs.mkdir(path.dirname(dst), { recursive: true });
+      await fs.copyFile(src, dst);
+      return {
+        content: [
+          { type: "text", text: `已复制: ${params.from} → ${params.to}` },
+        ],
+        details: { from: params.from, to: params.to },
+      };
+    },
+  },
+  {
+    name: "delete_file",
+    label: "删除文件",
+    description: "删除工作区内的文件（不删除目录）。属于敏感操作，需要用户确认。",
+    parameters: Type.Object({
+      path: Type.String({ description: "相对文件路径" }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const file = resolveInWorkdir(params.path);
+      await fs.unlink(file);
+      return {
+        content: [{ type: "text", text: `已删除文件: ${params.path}` }],
+        details: { path: params.path },
+      };
+    },
+  },
+  {
     name: "todo_create",
     label: "创建任务计划",
     description:
