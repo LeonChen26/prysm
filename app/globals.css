@@ -1,0 +1,581 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-muted: #f1f1f4;
+  --text: #17171a;
+  --text-muted: #6b6b74;
+  --border: rgba(23, 23, 26, 0.1);
+  --brand: #4b3fe3;
+  --brand-soft: #f2f1ff;
+  --success: #1dc981;
+  --danger: #e8463a;
+  --warning: #efaa17;
+  --radius: 10px;
+  --radius-card: 14px;
+  --shadow: 0 1px 2px rgba(23, 23, 26, 0.05), 0 8px 24px rgba(23, 23, 26, 0.06);
+}
+
+:root[data-widget-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101013;
+    --surface: #1a1a1f;
+    --surface-muted: #232329;
+    --text: #e7e7ea;
+    --text-muted: #9a9aa4;
+    --border: rgba(231, 231, 234, 0.12);
+    --brand: #6f66ff;
+    --brand-soft: #23203f;
+    --success: #2ed48c;
+    --danger: #f0655a;
+    --warning: #f0b54a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    "SF Pro Text",
+    "PingFang SC",
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* ---------- Header ---------- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px var(--brand-soft);
+}
+
+.brand h1 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--success);
+}
+
+.status-busy .status-dot {
+  background: var(--warning);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---------- Main layout ---------- */
+.app-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 20px;
+  min-height: 0;
+  padding: 20px 0;
+}
+
+@media (max-width: 760px) {
+  .app-main {
+    grid-template-columns: 1fr;
+  }
+  .panel {
+    order: -1;
+    max-height: 180px;
+  }
+}
+
+/* ---------- Chat ---------- */
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.chat-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.empty-sub {
+  font-size: 13px;
+  max-width: 360px;
+}
+
+.message {
+  display: flex;
+  gap: 12px;
+}
+
+.message-role {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.message-user .message-role {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.message-assistant .message-role {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.message-body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 9px;
+  font-size: 14px;
+}
+
+.message-user .message-body {
+  color: var(--text);
+}
+
+.cursor-blink {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  background: var(--brand);
+  border-radius: 2px;
+  vertical-align: text-bottom;
+  animation: pulse 0.9s ease-in-out infinite;
+}
+
+.error-banner {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* ---------- Input bar ---------- */
+.input-bar {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.input-bar input {
+  flex: 1;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input-bar input:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+.input-bar input:disabled {
+  opacity: 0.6;
+}
+
+.input-bar button {
+  padding: 0 22px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--brand);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.05s ease;
+}
+
+.input-bar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.input-bar button:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* ---------- Task panel ---------- */
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  overflow: hidden;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.panel-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel-title h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+.panel-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+.panel-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+/* ---------- Approval cards ---------- */
+.approval-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.approval-card {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approval-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.approval-args {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.approval-actions button {
+  flex: 1;
+  padding: 7px 0;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btn-approve {
+  background: var(--success);
+  color: #fff;
+}
+
+.btn-deny {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.approval-actions button:hover {
+  opacity: 0.85;
+}
+
+/* ---------- Todo plan ---------- */
+.todo-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.todo-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  transition: border-color 0.2s ease;
+}
+
+.todo-mark {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 999px;
+  border: 1.5px solid var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  color: #fff;
+}
+
+.todo-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-title {
+  font-size: 13px;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.todo-detail {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.todo-state {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.todo-in_progress {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+}
+
+.todo-in_progress .todo-mark {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 40%, transparent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.todo-completed {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
+
+.todo-completed .todo-mark {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.todo-completed .todo-state {
+  color: var(--success);
+}
+
+.todo-cancelled {
+  opacity: 0.55;
+}
+
+.todo-cancelled .todo-mark {
+  border-color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+.todo-cancelled .todo-title {
+  text-decoration: line-through;
+}
+
+/* ---------- Tool cards ---------- */
+.card-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  transition: border-color 0.2s ease;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.card-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.card-running .card-status {
+  background: var(--warning);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.card-done .card-status {
+  background: var(--success);
+}
+
+.card-error .card-status {
+  background: var(--danger);
+}
+
+.card-running {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+}
+
+.card-done {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
+
+.card-error {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.card-name {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.card-state {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.card-args {
+  display: block;
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  word-break: break-all;
+  white-space: pre-wrap;
+}

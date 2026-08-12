@@ -1,0 +1,152 @@
+import { DatabaseSync } from "node:sqlite";
+import path from "node:path";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+
+/**
+ * 情景记忆（阶段 4）
+ * 存储原始 episode（对话轨迹），检索时用 BM25 全文匹配注入上下文。
+ * 参考 MemMachine 的 ground-truth-preserving 思路：保存原始记录，
+ * 不依赖 LLM 反复提取，降低累积误差与成本。
+ *
+ * 存储：Node 内置 SQLite + FTS5（零额外依赖）
+ * 中文检索：写入时在中文字符间插空格，让 unicode61 按字符分词
+ */
+
+const MEMORY_DB = path.resolve(process.cwd(), "agent-memory.db");
+
+/** 每轮检索返回的最大 episode 数 */
+export const MEMORY_RECALL_K = Number(process.env.MEMORY_RECALL_K ?? 5);
+/** 每条 episode 注入时截断的最大字符数 */
+const MAX_CHARS_PER_EPISODE = 200;
+
+let db: DatabaseSync | undefined;
+/** 记录已写入的会话消息条数，避免每次全量扫描 */
+let lastStoredCount = 0;
+
+function getDb(): DatabaseSync {
+  if (db) return db;
+  const d = new DatabaseSync(MEMORY_DB);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS episodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      UNIQUE(role, content)
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS episodes_fts USING fts5(content, tokenize='unicode61');
+  `);
+  db = d;
+  return d;
+}
+
+/** 中文之间插空格，使 FTS 按字符分词 */
+function tokenizeForFts(text: string): string {
+  return text
+    .replace(/([\u4e00-\u9fff\u3000-\u303f])/g, " $1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 检索时的中文停用词（无信息量的通用词） */
+const STOPWORDS = new Set([
+  "你", "我", "他", "她", "它", "的", "了", "吗", "呢", "吧", "啊", "在",
+  "是", "有", "和", "与", "或", "什么", "怎么", "哪些", "哪个", "记得",
+  "之前", "然后", "现在", "一个", "这个", "那个", "可以", "请", "还",
+  "让", "把", "对", "就", "都", "也", "要", "会", "能", "被", "给",
+  "上", "下", "中", "过", "做", "想", "看", "问",
+]);
+
+/** 提取查询关键词：去停用词，最多保留 TOP_N 个 */
+function queryTokens(query: string, topN = 8): string[] {
+  return tokenizeForFts(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((t) => !STOPWORDS.has(t))
+    .slice(0, topN);
+}
+
+/** 提取消息纯文本 */
+function messageText(m: AgentMessage): string {
+  const content = m.content;
+  if (typeof content === "string") return content;
+  return content
+    .map((b) => {
+      if (b.type === "text") return b.text;
+      if (b.type === "toolCall") return `[调用工具 ${b.name} 参数 ${JSON.stringify(b.arguments)}]`;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** 批量写入 episode（按 role+content 去重），返回新增条数 */
+export function rememberMessages(messages: AgentMessage[]): number {
+  const d = getDb();
+  const ins = d.prepare(
+    "INSERT OR IGNORE INTO episodes (role, content, ts) VALUES (?, ?, ?)",
+  );
+  const insFts = d.prepare(
+    "INSERT OR IGNORE INTO episodes_fts (rowid, content) VALUES (?, ?)",
+  );
+  let stored = 0;
+  d.exec("BEGIN");
+  try {
+    for (const m of messages) {
+      const text = messageText(m).trim();
+      if (!text) continue;
+      const r = ins.run(m.role, text, m.timestamp ?? Date.now());
+      if (r.changes > 0) {
+        insFts.run(Number(r.lastInsertRowid), tokenizeForFts(text));
+        stored++;
+      }
+    }
+    d.exec("COMMIT");
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+  return stored;
+}
+
+/** 只写入会话中新增的消息（基于已存条数增量），返回新增条数 */
+export function rememberNewMessages(messages: AgentMessage[]): number {
+  if (messages.length <= lastStoredCount) return 0;
+  const newOnes = messages.slice(lastStoredCount);
+  lastStoredCount = messages.length;
+  return rememberMessages(newOnes);
+}
+
+/** 会话重置时同步重置增量指针 */
+export function resetMemoryTracking(): void {
+  lastStoredCount = 0;
+}
+
+/** 按查询检索相关历史 episode，返回拼接文本（无结果返回空串） */
+export function retrieveEpisodes(query: string, k = MEMORY_RECALL_K): string {
+  const tokens = queryTokens(query);
+  if (tokens.length === 0) return "";
+  // OR 匹配 + BM25 排序：让包含更多关键词的 episode 排前
+  const match = tokens.map((t) => `"${t}"`).join(" OR ");
+  const rows = getDb()
+    .prepare(
+      `SELECT e.role, e.content
+       FROM episodes_fts JOIN episodes e ON e.id = episodes_fts.rowid
+       WHERE episodes_fts MATCH ?
+       ORDER BY bm25(episodes_fts)
+       LIMIT ?`,
+    )
+    .all(match, k) as { role: string; content: string }[];
+  if (rows.length === 0) return "";
+  return rows
+    .map((r) => `[${r.role}] ${r.content.slice(0, MAX_CHARS_PER_EPISODE)}`)
+    .join("\n");
+}
+
+/** 当前记忆库中的 episode 总数（调试用） */
+export function countEpisodes(): number {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM episodes")
+    .get() as { n: number };
+  return row.n;
+}

@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+.env.local
+.env*.local
+agent-workdir/
+agent-memory.db
+*.log
+.DS_Store
