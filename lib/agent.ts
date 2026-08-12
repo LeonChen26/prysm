@@ -3,6 +3,7 @@ import { contentText, createModels } from "@earendil-works/pi-ai";
 import { requestApproval } from "./approval";
 import { messageText, transformContext } from "./context";
 import { MEMORY_RECALL_K, resetMemoryTracking, retrieveEpisodes } from "./memory";
+import { isAutoApproved } from "./policy";
 import { tools } from "./tools";
 
 const PROVIDER_FACTORIES = {
@@ -145,9 +146,9 @@ export async function getAgent(): Promise<Agent> {
     streamFn: m.streamSimple.bind(m),
     // 阶段 2+4：上下文压缩 + 情景记忆检索注入
     transformContext: buildContext,
-    // 阶段 3：审批流 —— 敏感工具先征求用户确认
+    // 阶段 3+6：审批流 —— 敏感工具先征求用户确认（命中白名单规则则自动放行）
     beforeToolCall: async ({ toolCall, args }) => {
-      if (SENSITIVE_TOOLS.has(toolCall.name)) {
+      if (SENSITIVE_TOOLS.has(toolCall.name) && !isAutoApproved(toolCall.name, args)) {
         const approved = await requestApproval({
           id: toolCall.id,
           toolName: toolCall.name,
