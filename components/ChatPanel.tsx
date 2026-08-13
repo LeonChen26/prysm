@@ -333,6 +333,11 @@ export function ChatPanel() {
   return (
     <div className="app">
       <header className="app-header">
+        <div className="traffic-lights" aria-hidden="true">
+          <span className="tl tl-red" />
+          <span className="tl tl-yellow" />
+          <span className="tl tl-green" />
+        </div>
         <div className="brand">
           <span className="brand-dot" />
           <h1>WorkBuddy Agent</h1>
@@ -416,7 +421,13 @@ export function ChatPanel() {
             )}
             {messages.map((m, i) => (
               <div key={i} className={`message message-${m.role}`}>
-                <div className="message-role">{m.role === "user" ? "你" : "Agent"}</div>
+                <div className="message-role">
+                  {m.role === "user" ? (
+                    <span aria-hidden="true">●</span>
+                  ) : (
+                    <span aria-hidden="true">✦</span>
+                  )}
+                </div>
                 <div className="message-body">
                   {m.text ? (
                     <div className="md">
@@ -452,8 +463,24 @@ export function ChatPanel() {
                 停止
               </button>
             ) : (
-              <button type="submit" disabled={!input.trim()}>
-                发送
+              <button
+                type="submit"
+                className="btn-send"
+                disabled={!input.trim()}
+                aria-label="发送"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
               </button>
             )}
           </form>
