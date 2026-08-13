@@ -1,10 +1,12 @@
 import { Agent, type AgentEvent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import { contentText, createModels } from "@earendil-works/pi-ai";
-import { requestApproval } from "./approval";
+import { notifyApprovalNotice, requestApproval } from "./approval";
+import { logApproval } from "./audit";
 import { messageText } from "./messages";
 import { transformContext } from "./context";
 import { MEMORY_RECALL_K, resetMemoryTracking, retrieveEpisodes } from "./memory";
-import { isAutoApproved } from "./policy";
+import { isAutoApproved, isDenied } from "./policy";
+import { assessRisk } from "./risk";
 import { getSessionMessages } from "./session";
 import { tools } from "./tools";
 
@@ -232,17 +234,41 @@ export async function getAgent(sessionId: string): Promise<Agent> {
       process.env.TOOL_EXECUTION === "sequential" ? "sequential" : "parallel",
     // 阶段 2+4：上下文压缩 + 情景记忆检索注入
     transformContext: buildContext,
-    // 阶段 3+6：审批流 —— 敏感工具先征求用户确认（命中白名单规则则自动放行）
+    // 阶段 3+6：审批流 —— 敏感工具先评估风险与策略：
+    //   黑名单命中直接拦截；白名单命中自动放行（落审计）；否则征求用户确认
     beforeToolCall: async ({ toolCall, args }) => {
-      if (SENSITIVE_TOOLS.has(toolCall.name) && !isAutoApproved(toolCall.name, args)) {
-        const approved = await requestApproval({
-          id: toolCall.id,
-          toolName: toolCall.name,
-          args,
+      if (!SENSITIVE_TOOLS.has(toolCall.name)) return undefined;
+
+      // 1) 强制拦截（deny 优先于 allow）
+      const deny = isDenied(toolCall.name, args);
+      if (deny.denied) {
+        const reason = deny.reason ?? "该操作被策略禁止";
+        logApproval(toolCall.name, args, "denied_auto", { sessionId, reason });
+        notifyApprovalNotice(toolCall.name, args, reason, sessionId);
+        return { block: true, reason };
+      }
+
+      // 2) 白名单自动放行（落审计，不打扰用户）
+      if (isAutoApproved(toolCall.name, args)) {
+        logApproval(toolCall.name, args, "auto", {
+          sessionId,
+          reason: "命中自动放行规则",
         });
-        if (!approved) {
-          return { block: true, reason: "用户拒绝了该操作" };
-        }
+        return undefined;
+      }
+
+      // 3) 人工审批（带风险等级与会话关联）
+      const risk = assessRisk(toolCall.name, args);
+      const approved = await requestApproval({
+        id: toolCall.id,
+        toolName: toolCall.name,
+        args,
+        sessionId,
+        risk: risk.level,
+        riskReason: risk.reason,
+      });
+      if (!approved) {
+        return { block: true, reason: "用户拒绝了该操作" };
       }
       return undefined;
     },

@@ -8,8 +8,8 @@
 - **模型多提供商**：anthropic / deepseek / openai / google，通过环境变量切换
 - **上下文压缩**：对话超长时自动摘要化旧消息，节省 token
 - **情景记忆**：跨会话检索历史 episode，自动注入相关上下文（SQLite 持久化于 `agent-memory.db`），侧栏可查看 / 删除 / 清空记忆
-- **工具审批**：敏感操作（写文件 / 删文件 / 执行命令）先征求用户确认；支持白名单规则自动放行
-- **审批历史审计**：每次审批决定（同意 / 拒绝 / 超时）持久化到 `audit.db`，侧栏可查看与清空，支持回溯
+- **工具审批**：敏感操作（写文件 / 删文件 / 执行命令）先征求用户确认，审批卡片位于对话窗内并带风险分级与倒计时；支持白名单自动放行与黑名单强制拦截
+- **审批历史审计**：每次审批决定（同意 / 拒绝 / 超时 / 策略拦截 / 自动放行）持久化到 `audit.db`，侧栏可筛选（工具 / 动作）、分页、查看与清空，支持回溯；敏感参数自动脱敏
 - **快捷键与命令**：`Ctrl/Cmd+N` 新建会话、`Ctrl/Cmd+K` 聚焦会话搜索、输入框 `↑` 回退编辑上一条用户消息（编辑态再按可继续回退更早）；输入 `/new` `/clear` `/export` `/theme` `/help` 斜杠命令快速操作
 - **并行工具执行**：单条消息含多个工具调用时并行执行，可切换为串行
 - **联网搜索**：bing（默认，国内可直连）/ duckduckgo
@@ -128,7 +128,8 @@ pm2 start .next/standalone/server.js --name prysm
 | `POST /api/agent` | 发送消息，SSE 流式返回 Agent 事件 |
 | `POST /api/agent/stop` | 停止当前会话的 Agent |
 | `POST /api/agent/approve` | 审批操作（同意 / 拒绝） |
-| `GET /api/audit` | 审批历史列表（`?limit=` 默认 50） |
+| `GET /api/agent/pending` | 当前未决审批（刷新页面后恢复审批卡片） |
+| `GET /api/audit` | 审批历史列表（`?limit=` 默认 50，`?tool=` / `?action=` 筛选，`?offset=` 分页） |
 | `POST /api/audit` | 清空审批历史（`{ action: "clear" }`） |
 | `GET /api/agent/logs` | 最近 Agent 运行日志（`POST` 传 `{ action: "clear" }` 清空） |
 | `GET /api/stats` | 运行统计概览（成功率 / 耗时 / 工具排行 / 按天分布） |
@@ -157,6 +158,10 @@ pm2 start .next/standalone/server.js --name prysm
 | `APPROVAL_TIMEOUT_MS` | `120000` | 敏感工具等待审批的超时毫秒数，超时视为拒绝 |
 | `APPROVAL_ALLOW_TOOLS` | 空 | 免审批工具名白名单（逗号分隔），如 `append_file,create_dir` |
 | `APPROVAL_ALLOW_PATHS` | 空 | 路径放行规则（逗号分隔）：`notes/` 目录前缀、`*.md` 文件名通配、其他视为路径前缀 |
+| `APPROVAL_ALLOW_COMMANDS` | 空 | run_bash 命令放行规则（逗号分隔，按首行前缀匹配），如 `git push,npm run` |
+| `APPROVAL_DENY_TOOLS` | 空 | 强制拦截工具黑名单（逗号分隔），命中直接拒绝、不进审批 |
+| `APPROVAL_DENY_PATHS` | 空 | 路径拦截规则（语法同 `ALLOW_PATHS`），如 `.env,.git/` |
+| `APPROVAL_DENY_COMMANDS` | 空 | run_bash 命令拦截规则（子串匹配），如 `rm -rf /,| sh` |
 | `MEMORY_RECALL_K` | `5` | 每次检索注入的历史 episode 条数 |
 | `TOOL_EXECUTION` | `parallel` | 并行 / 串行工具执行：`parallel` / `sequential` |
 | `WEB_SEARCH_PROVIDER` | `bing` | 搜索提供器：`bing` / `duckduckgo` |
@@ -181,7 +186,7 @@ pm2 start .next/standalone/server.js --name prysm
 测试按类型放在 `tests/` 目录下（`unit/` 离线单测、`web/` 联网搜索、`e2e/` 端到端），用 npm 脚本直接运行：
 
 ```bash
-npm run test:unit   # 12 个离线单测（todo/会话/审批/上下文压缩等）
+npm run test:unit   # 13 个离线单测（todo/会话/审批/风险/上下文压缩等）
 npm run test:web    # 联网搜索与网页抓取
 npm run test:e2e    # 端到端测试（需先启动 npm run dev）
 ```

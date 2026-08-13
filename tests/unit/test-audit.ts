@@ -6,7 +6,7 @@
  */
 
 import { requestApproval, resolveApproval } from "../../lib/approval";
-import { clearApprovals, countApprovals, listApprovals } from "../../lib/audit";
+import { clearApprovals, countApprovals, listApprovals, redactArgs } from "../../lib/audit";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);
@@ -44,21 +44,47 @@ async function main() {
   const r3 = await p3;
   console.log("超时路径结果:", r3);
 
+  // 带会话关联与风险的审批记录
+  const p4 = requestApproval(
+    { id: "a4", toolName: "write_file", args: { path: "x.txt" }, sessionId: "s1", risk: "high" },
+    5000,
+  );
+  resolveApproval("a4", false);
+  const r4 = await p4;
+  console.log("带会话审批结果:", r4);
+
   const list = listApprovals(10);
   const total = countApprovals();
   const acts = list.map((a) => `${a.toolName}:${a.action}`);
   console.log("历史:", acts.join(", "));
 
-  if (total < 3) fail(`应有至少 3 条历史，实际 ${total}`);
+  if (total < 4) fail(`应有至少 4 条历史，实际 ${total}`);
   if (!acts.includes("write_file:approved")) fail("缺少 approved 记录");
   if (!acts.includes("delete_file:denied")) fail("缺少 denied 记录");
   if (!acts.includes("run_bash:timeout")) fail("缺少 timeout 记录");
+  // 会话关联与风险等级被记录（可回溯）
+  const w4 = list.find((a) => a.id > 0 && a.sessionId === "s1");
+  if (!w4) fail("应记录 sessionId");
+  console.log(`  ✓ 会话关联: ${w4.sessionId} / 风险: ${w4.risk}`);
+  if (w4.risk !== "high") fail("risk 应记录为 high");
   // 参数被记录（可回溯）
   const first = list[0];
-  if (!first.args || !first.args.includes("x.txt") && first.toolName !== "run_bash") {
-    // 不强制校验内容，仅确认有 args 字段
-  }
   if (typeof first.args !== "string") fail("args 应为字符串");
+
+  console.log("\n== 敏感信息脱敏 ==");
+  const red = redactArgs({
+    token: "sk-abcdefghijklmnop",
+    apiKey: "my-secret-key",
+    command: "echo sk-live-1234567890 > /tmp/x",
+    path: "x.txt",
+    nested: { password: "p@ss" },
+  });
+  console.log("脱敏结果:", red);
+  if (red.includes("sk-abcdefghijklmnop")) fail("token 值未脱敏");
+  if (red.includes("my-secret-key")) fail("apiKey 值未脱敏");
+  if (red.includes("sk-live-1234567890")) fail("命令内嵌密钥串未脱敏");
+  if (red.includes("p@ss")) fail("嵌套 password 未脱敏");
+  if (!red.includes("[redacted]")) fail("应包含 [redacted] 占位");
 
   const removed = clearApprovals();
   console.log("清空:", removed, "| 剩余:", countApprovals());

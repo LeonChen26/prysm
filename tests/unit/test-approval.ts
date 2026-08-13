@@ -4,8 +4,10 @@
  * 运行：npx tsx test-approval.ts
  */
 import {
+  listPendingApprovals,
   requestApproval,
   resolveApproval,
+  subscribeApprovalLifecycle,
   subscribeApprovals,
 } from "../../lib/approval";
 
@@ -64,6 +66,46 @@ async function main() {
   requestApproval({ id: "b3", toolName: "write_file", args: {} });
   resolveApproval("b3", true);
   expectEq("取消订阅后不再收到", received.join(","), "b1,b2");
+
+  console.log("\n== 生命周期事件（required/resolved/expired + 会话关联） ==");
+  const events: string[] = [];
+  const unsubLife = subscribeApprovalLifecycle((e) => {
+    if (e.type === "required") events.push(`required:${e.state.id}:${e.state.sessionId}`);
+    if (e.type === "resolved") events.push(`resolved:${e.state.id}`);
+    if (e.type === "expired") events.push(`expired:${e.state.id}`);
+  });
+  const pc1 = requestApproval(
+    { id: "c1", toolName: "write_file", args: { path: "x.txt" }, sessionId: "s1" },
+    200,
+  );
+  resolveApproval("c1", true);
+  await pc1;
+  requestApproval(
+    { id: "c2", toolName: "run_bash", args: { command: "ls" }, sessionId: "s2" },
+    30,
+  );
+  await sleep(80);
+  expectEq(
+    "事件顺序（含会话 id）",
+    events.join("|"),
+    "required:c1:s1|resolved:c1|required:c2:s2|expired:c2",
+  );
+  unsubLife();
+
+  console.log("\n== pending 快照（刷新页面恢复审批） ==");
+  const pd = requestApproval({ id: "d1", toolName: "write_file", args: { path: "x" } }, 5000);
+  const pend = listPendingApprovals();
+  const d1 = pend.find((x) => x.id === "d1");
+  if (!d1) fail("pending 应包含 d1");
+  expectEq("pending 状态为 pending", d1.status, "pending");
+  expectEq("pending 带过期时间", typeof d1.expiresAt, "number");
+  resolveApproval("d1", true);
+  await pd;
+  expectEq(
+    "决定后 pending 清空",
+    listPendingApprovals().some((x) => x.id === "d1"),
+    false,
+  );
 
   console.log("\n✓ 工具审批流验证通过");
 }

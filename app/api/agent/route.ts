@@ -7,7 +7,7 @@ import {
   logRun,
   mapEvent,
 } from "@/lib/agent";
-import { subscribeApprovals } from "@/lib/approval";
+import { subscribeApprovalLifecycle } from "@/lib/approval";
 import { rememberMessages } from "@/lib/memory";
 import {
   createSession,
@@ -138,15 +138,39 @@ export async function POST(req: Request) {
         }
         send(ui);
       });
-      // 审批请求事件（来自 beforeToolCall）也推送到同一条 SSE 流
-      const unsubApprovals = subscribeApprovals((req) =>
-        send({
-          type: "approval_required",
-          id: req.id,
-          toolName: req.toolName,
-          args: req.args,
-        }),
-      );
+      // 审批生命周期事件（来自 beforeToolCall）推送到同一条 SSE 流：
+      // required → approval_required（带风险/过期时间）；resolved/expired → 结束事件；
+      // notice → policy_notice（策略直接拦截提示）。多会话并发时按会话隔离推送。
+      const unsubApprovals = subscribeApprovalLifecycle((e) => {
+        if (e.type === "required") {
+          if (e.state.sessionId && e.state.sessionId !== session.id) return;
+          send({
+            type: "approval_required",
+            id: e.state.id,
+            toolName: e.state.toolName,
+            args: e.state.args,
+            risk: e.state.risk,
+            riskReason: e.state.riskReason,
+            expiresAt: e.state.expiresAt,
+          });
+        } else if (e.type === "resolved" || e.type === "expired") {
+          if (e.state.sessionId && e.state.sessionId !== session.id) return;
+          send({
+            type: e.type === "resolved" ? "approval_resolved" : "approval_expired",
+            id: e.state.id,
+            approve: e.type === "resolved" && e.state.status === "approved",
+          });
+        } else if (e.type === "notice") {
+          if (e.sessionId && e.sessionId !== session.id) return;
+          send({
+            type: "policy_notice",
+            toolName: e.toolName,
+            args: e.args,
+            action: e.action,
+            reason: e.reason,
+          });
+        }
+      });
 
       let aborted = false;
       let runError: unknown = undefined;

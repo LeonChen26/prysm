@@ -2087,6 +2087,67 @@ body.resizing {
   padding: 8px 2px 0;
 }
 
+.audit-filters {
+  display: flex;
+  gap: 6px;
+  padding: 6px 0 2px;
+}
+
+.audit-filters select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.audit-reason {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.audit-page {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.audit-page:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.audit-page:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.audit-footer .audit-clear {
+  margin-top: 0;
+  margin-left: auto;
+}
+
 /* ---------- 消息流内联工具卡片 ---------- */
 .inline-tools {
   display: flex;
@@ -2266,7 +2327,43 @@ body.resizing {
   text-decoration: underline;
 }
 
-/* ---------- Approval cards ---------- */
+/* ---------- Approval dock（对话窗内，输入框上方） ---------- */
+.approval-dock {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(8px);
+  padding: 10px 16px;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.approval-batch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.approval-batch button {
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.approval-batch button:hover {
+  background: var(--surface-muted);
+}
+
 .approval-list {
   display: flex;
   flex-direction: column;
@@ -2275,26 +2372,102 @@ body.resizing {
 
 .approval-card {
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: opacity 0.15s ease;
+}
+
+/* 风险等级配色：边框 + 左侧色条 */
+.approval-card.risk-low {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+}
+.approval-card.risk-medium {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+}
+.approval-card.risk-high {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--warning));
+}
+.approval-card.risk-critical {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+
+.approval-deciding {
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 .approval-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 600;
 }
 
+.approval-risk {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+}
+.approval-risk.risk-low {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+.approval-risk.risk-medium {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+.approval-risk.risk-high {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: color-mix(in srgb, var(--danger) 30%, var(--warning));
+}
+.approval-risk.risk-critical {
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+  color: var(--danger);
+}
+
+.approval-tool {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-countdown {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.approval-countdown-urgent {
+  color: var(--danger);
+}
+
+.approval-reason {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--warning) 20%, var(--text-muted));
+}
+
 .approval-args {
+  margin: 0;
   font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-muted);
   word-break: break-all;
   white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .approval-actions {
@@ -2313,6 +2486,11 @@ body.resizing {
   transition: opacity 0.15s ease;
 }
 
+.approval-actions button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .btn-approve {
   background: var(--success);
   color: #fff;
@@ -2323,7 +2501,7 @@ body.resizing {
   color: var(--text);
 }
 
-.approval-actions button:hover {
+.approval-actions button:hover:not(:disabled) {
   opacity: 0.85;
 }
 

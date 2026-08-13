@@ -24,12 +24,14 @@ import {
   WbFolderIcon,
 } from "./chat-blocks";
 import {
+  formatApprovalArgs,
   formatDuration,
   formatGroupLabel,
   formatMsgTime,
   formatRelTime,
   GROUP_ORDER,
   readSSE,
+  RISK_LABELS,
   TODO_STATUS_LABELS,
   type ApprovalCard,
   type RunStats,
@@ -66,6 +68,15 @@ const QUICK_TASKS = [
 /** 超过该字符数的消息默认折叠，点击展开 */
 const LONG_MSG_THRESHOLD = 4000;
 
+/** 审批动作展示文案 */
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  approved: "允许",
+  denied: "拒绝",
+  timeout: "超时",
+  denied_auto: "拦截",
+  auto: "自动放行",
+};
+
 export function ChatPanel() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -73,6 +84,8 @@ export function ChatPanel() {
   const [cards, setCards] = useState<ToolCard[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [approvals, setApprovals] = useState<ApprovalCard[]>([]);
+  /** 倒计时心跳（每秒 +1，驱动审批卡片剩余秒数刷新） */
+  const [countdownTick, setCountdownTick] = useState(0);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,10 +126,22 @@ export function ChatPanel() {
   const [logsOpen, setLogsOpen] = useState(false);
   /** 审批历史：最近审批决定 + 折叠 */
   const [audits, setAudits] = useState<
-    { id: number; toolName: string; args: string; action: string; ts: number }[]
+    {
+      id: number;
+      toolName: string;
+      args: string;
+      action: string;
+      ts: number;
+      risk?: string;
+      reason?: string;
+    }[]
   >([]);
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditOpen, setAuditOpen] = useState(false);
+  /** 审批历史筛选：工具 / 动作 / 分页偏移 */
+  const [auditTool, setAuditTool] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditOffset, setAuditOffset] = useState(0);
   /** 运行统计概览：汇总 + 工具排行 + 按天分布 */
   const [stats, setStats] = useState<RunStats | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -313,6 +338,30 @@ export function ChatPanel() {
     [notifyOn],
   );
 
+  /** 待审批请求出现时通知（页面不在前台且已授权；随任务完成开关启用） */
+  const notifyApproval = useCallback(
+    (toolLabel: string) => {
+      if (!notifyOn) return;
+      try {
+        if (document.visibilityState === "visible") return;
+        if (!("Notification" in window) || Notification.permission !== "granted") return;
+        new Notification("Prysm 需要审批", {
+          body: `等待确认：${toolLabel}`,
+          tag: "wb-approval",
+        });
+      } catch {
+        /* 通知失败静默 */
+      }
+    },
+    [notifyOn],
+  );
+
+  /** 短暂信息提示（6 秒后自动消失），供策略拦截等通知使用 */
+  const showNotice = useCallback((msg: string) => {
+    setInfo(msg);
+    window.setTimeout(() => setInfo((v) => (v === msg ? null : v)), 6000);
+  }, []);
+
   // 会话搜索：本地标题过滤之外，防抖查询后端消息内容匹配
   useEffect(() => {
     const q = sessionQuery.trim();
@@ -467,10 +516,14 @@ export function ChatPanel() {
     }
   }, []);
 
-  /** 拉取最近审批历史 */
+  /** 拉取最近审批历史（支持按工具/动作筛选与分页） */
   const refreshAudits = useCallback(async () => {
     try {
-      const r = await fetch("/api/audit?limit=50");
+      const params = new URLSearchParams({ limit: "50" });
+      if (auditTool) params.set("tool", auditTool);
+      if (auditAction) params.set("action", auditAction);
+      if (auditOffset > 0) params.set("offset", String(auditOffset));
+      const r = await fetch(`/api/audit?${params}`);
       const data = await r.json();
       if (Array.isArray(data?.approvals)) {
         setAudits(data.approvals);
@@ -479,7 +532,7 @@ export function ChatPanel() {
     } catch {
       /* 静默 */
     }
-  }, []);
+  }, [auditTool, auditAction, auditOffset]);
 
   /** 清空审批历史 */
   const clearAudits = useCallback(async () => {
@@ -683,6 +736,36 @@ export function ChatPanel() {
   useEffect(() => {
     refreshAudits();
   }, [refreshAudits]);
+  // 挂载时恢复未决审批（刷新页面后仍有剩余时间的审批请求继续展示）
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/agent/pending")
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.approvals)) return;
+        const now = Number(data.now ?? Date.now());
+        const cards = (data.approvals as ApprovalCard[])
+          .filter((a) => a.expiresAt && a.expiresAt > now)
+          .map((a) => ({ ...a, deciding: false }));
+        if (cards.length > 0) setApprovals(cards);
+      })
+      .catch(() => {
+        /* 静默：无 pending 或接口不可用 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // 审批倒计时：存在待审批卡片时每秒刷新，并兜底清理已过期的卡片
+  useEffect(() => {
+    if (approvals.length === 0) return;
+    const t = setInterval(() => {
+      const now = Date.now();
+      setApprovals((a) => a.filter((x) => !x.expiresAt || x.expiresAt > now));
+      setCountdownTick((n) => n + 1);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [approvals.length]);
   // 初始拉取运行统计
   useEffect(() => {
     refreshStats();
@@ -937,8 +1020,32 @@ export function ChatPanel() {
               if (!id || !toolName) break;
               setApprovals((a) => [
                 ...a,
-                { id, toolName, args: ev.args },
+                {
+                  id,
+                  toolName,
+                  args: ev.args,
+                  risk: ev.risk,
+                  riskReason: ev.riskReason,
+                  createdAt: Date.now(),
+                  expiresAt: ev.expiresAt,
+                },
               ]);
+              notifyApproval(TOOL_META[toolName]?.label ?? toolName);
+              break;
+            }
+            case "approval_resolved":
+            case "approval_expired": {
+              if (!ev.id) break;
+              setApprovals((a) => a.filter((item) => item.id !== ev.id));
+              if (ev.type === "approval_expired") {
+                showNotice("审批已超时，该操作已被拒绝");
+              }
+              refreshAudits();
+              break;
+            }
+            case "policy_notice": {
+              const label = TOOL_META[ev.toolName ?? ""]?.label ?? ev.toolName ?? "";
+              showNotice(`${label} 已被策略拦截：${ev.reason ?? "命中禁止规则"}`);
               break;
             }
             case "stopped":
@@ -966,7 +1073,7 @@ export function ChatPanel() {
         refreshStats();
       }
     },
-    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion],
+    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion, notifyApproval, showNotice],
   );
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
@@ -1171,22 +1278,49 @@ export function ChatPanel() {
     setRenameValue(title);
   }, []);
 
-  const decideApproval = useCallback(async (id: string, approve: boolean) => {
-    setApprovals((a) => a.filter((item) => item.id !== id));
-    try {
-      const res = await fetch("/api/agent/approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, approve }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setError(data?.error ?? "审批请求失败");
+  /** 用户对某个审批请求作出决定：先标记 deciding（按钮 loading），成功后移除卡片 */
+  const decideApproval = useCallback(
+    async (id: string, approve: boolean) => {
+      setApprovals((a) =>
+        a.map((item) => (item.id === id ? { ...item, deciding: true } : item)),
+      );
+      try {
+        const res = await fetch("/api/agent/approve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, approve }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          setError(data?.error ?? "审批请求失败");
+          // 失败时恢复按钮可点
+          setApprovals((a) =>
+            a.map((item) =>
+              item.id === id ? { ...item, deciding: false } : item,
+            ),
+          );
+        } else {
+          setApprovals((a) => a.filter((item) => item.id !== id));
+          refreshAudits();
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        setApprovals((a) =>
+          a.map((item) => (item.id === id ? { ...item, deciding: false } : item)),
+        );
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
+    },
+    [refreshAudits],
+  );
+
+  /** 批量决定（并行工具调用产生多个待审批请求时一键处理） */
+  const batchDecideApprovals = useCallback(
+    (approve: boolean) => {
+      const ids = approvals.map((a) => a.id);
+      ids.forEach((id) => decideApproval(id, approve));
+    },
+    [approvals, decideApproval],
+  );
 
   /** 中断当前正在执行的任务 */
   const stop = useCallback(async () => {
@@ -2026,6 +2160,90 @@ export function ChatPanel() {
             {error && <div className="error-banner">{error}</div>}
           </div>
 
+          {/* 审批请求：固定在对话窗内、输入框上方（不再放右侧栏） */}
+          {approvals.length > 0 && (
+            <div className="approval-dock">
+              {approvals.length > 1 && (
+                <div className="approval-batch">
+                  <span>待确认 {approvals.length} 项</span>
+                  <button
+                    type="button"
+                    onClick={() => batchDecideApprovals(true)}
+                  >
+                    全部允许
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => batchDecideApprovals(false)}
+                  >
+                    全部拒绝
+                  </button>
+                </div>
+              )}
+              <div className="approval-list">
+                {approvals.map((a) => {
+                  const risk = a.risk ?? "medium";
+                  const leftMs = a.expiresAt
+                    ? Math.max(0, a.expiresAt - Date.now())
+                    : 0;
+                  const leftSec = Math.ceil(leftMs / 1000);
+                  void countdownTick;
+                  return (
+                    <div
+                      key={a.id}
+                      className={`approval-card risk-${risk} ${
+                        a.deciding ? "approval-deciding" : ""
+                      }`}
+                    >
+                      <div className="approval-title">
+                        <span
+                          className={`approval-risk risk-${risk}`}
+                          title={a.riskReason}
+                        >
+                          {RISK_LABELS[risk] ?? risk}
+                        </span>
+                        <span className="approval-tool">
+                          需要确认：{TOOL_META[a.toolName]?.label ?? a.toolName}
+                        </span>
+                        {a.expiresAt && (
+                          <span
+                            className={`approval-countdown ${
+                              leftSec <= 10 ? "approval-countdown-urgent" : ""
+                            }`}
+                          >
+                            {leftSec}s
+                          </span>
+                        )}
+                      </div>
+                      {a.riskReason && (
+                        <div className="approval-reason">{a.riskReason}</div>
+                      )}
+                      <pre className="approval-args">
+                        {formatApprovalArgs(a.toolName, a.args)}
+                      </pre>
+                      <div className="approval-actions">
+                        <button
+                          className="btn-approve"
+                          disabled={a.deciding}
+                          onClick={() => decideApproval(a.id, true)}
+                        >
+                          {a.deciding ? "处理中…" : "允许"}
+                        </button>
+                        <button
+                          className="btn-deny"
+                          disabled={a.deciding}
+                          onClick={() => decideApproval(a.id, false)}
+                        >
+                          {a.deciding ? "处理中…" : "拒绝"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <form
             className="input-bar"
             onSubmit={(e) => {
@@ -2394,40 +2612,105 @@ export function ChatPanel() {
                 <h2>审批历史</h2>
                 <span className="panel-count">{auditTotal}</span>
               </div>
-              {auditOpen && audits.length > 0 && (
-                <div className="audit-body">
-                  {audits.map((a) => (
-                    <div
-                      key={a.id}
-                      className={`audit-item audit-${a.action}`}
+              {auditOpen && (
+                <>
+                  <div className="audit-filters">
+                    <select
+                      value={auditTool}
+                      onChange={(e) => {
+                        setAuditTool(e.target.value);
+                        setAuditOffset(0);
+                        refreshAudits();
+                      }}
+                      aria-label="按工具筛选"
                     >
-                      <div className="audit-item-head">
-                        <span className="audit-tool">
-                          {TOOL_META[a.toolName]?.label ?? a.toolName}
-                        </span>
-                        <span className="audit-action">
-                          {a.action === "approved"
-                            ? "允许"
-                            : a.action === "denied"
-                              ? "拒绝"
-                              : "超时"}
-                        </span>
-                        <span className="audit-time">{formatMsgTime(a.ts)}</span>
+                      <option value="">全部工具</option>
+                      {Object.entries(TOOL_META).map(([key, meta]) => (
+                        <option key={key} value={key}>
+                          {meta.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={auditAction}
+                      onChange={(e) => {
+                        setAuditAction(e.target.value);
+                        setAuditOffset(0);
+                        refreshAudits();
+                      }}
+                      aria-label="按动作筛选"
+                    >
+                      <option value="">全部动作</option>
+                      {Object.entries(AUDIT_ACTION_LABELS).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {audits.length > 0 && (
+                    <div className="audit-body">
+                      {audits.map((a) => (
+                        <div
+                          key={a.id}
+                          className={`audit-item audit-${a.action}`}
+                        >
+                          <div className="audit-item-head">
+                            <span className="audit-tool">
+                              {TOOL_META[a.toolName]?.label ?? a.toolName}
+                            </span>
+                            <span className="audit-action">
+                              {AUDIT_ACTION_LABELS[a.action] ?? a.action}
+                            </span>
+                            <span className="audit-time">
+                              {formatMsgTime(a.ts)}
+                            </span>
+                          </div>
+                          {a.reason && (
+                            <div className="audit-reason">{a.reason}</div>
+                          )}
+                          <code className="audit-args">
+                            {a.args?.slice(0, 100)}
+                          </code>
+                        </div>
+                      ))}
+                      <div className="audit-footer">
+                        <button
+                          type="button"
+                          className="audit-page"
+                          disabled={auditOffset === 0}
+                          onClick={() => {
+                            setAuditOffset((o) => Math.max(0, o - 50));
+                            refreshAudits();
+                          }}
+                        >
+                          更新
+                        </button>
+                        <button
+                          type="button"
+                          className="audit-page"
+                          disabled={auditOffset + 50 >= auditTotal}
+                          onClick={() => {
+                            setAuditOffset((o) => o + 50);
+                            refreshAudits();
+                          }}
+                        >
+                          更早
+                        </button>
+                        <button
+                          type="button"
+                          className="audit-clear"
+                          onClick={clearAudits}
+                        >
+                          清空历史
+                        </button>
                       </div>
-                      <code className="audit-args">{a.args?.slice(0, 100)}</code>
                     </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="audit-clear"
-                    onClick={clearAudits}
-                  >
-                    清空历史
-                  </button>
-                </div>
-              )}
-              {auditOpen && audits.length === 0 && (
-                <p className="audit-empty">暂无审批记录</p>
+                  )}
+                  {audits.length === 0 && (
+                    <p className="audit-empty">暂无审批记录</p>
+                  )}
+                </>
               )}
               <button
                 type="button"
@@ -2440,34 +2723,6 @@ export function ChatPanel() {
                 {auditOpen ? "收起历史" : "查看历史"}
               </button>
             </div>
-            {approvals.length > 0 && (
-              <div className="approval-list">
-                {approvals.map((a) => (
-                  <div key={a.id} className="approval-card">
-                    <div className="approval-title">
-                      需要确认：{TOOL_META[a.toolName]?.label ?? a.toolName}
-                    </div>
-                    <code className="approval-args">
-                      {JSON.stringify(a.args)?.slice(0, 120)}
-                    </code>
-                    <div className="approval-actions">
-                      <button
-                        className="btn-approve"
-                        onClick={() => decideApproval(a.id, true)}
-                      >
-                        允许
-                      </button>
-                      <button
-                        className="btn-deny"
-                        onClick={() => decideApproval(a.id, false)}
-                      >
-                        拒绝
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
             {todos.length > 0 && (
               <div className="todo-section">
                 <div className="panel-title">
