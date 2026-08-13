@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
+import { mdToPlainText } from "@/lib/plaintext";
 
 /** 工作区文件浏览器图标（SVG，随主题着色） */
 const WbFolderIcon = () => (
@@ -1141,6 +1142,9 @@ export function ChatPanel() {
     const text = input.trim();
     if (!text) return;
     setInput("");
+    // 发送后重置输入框高度为单行
+    const ta = document.querySelector<HTMLTextAreaElement>(".chat-input");
+    if (ta) ta.style.height = "auto";
     // 斜杠命令：/new /clear /export /theme /help
     if (text.startsWith("/")) {
       const cmd = text.split(/\s+/)[0].toLowerCase();
@@ -1237,19 +1241,25 @@ export function ChatPanel() {
     [messages, streamReply],
   );
 
-  /** 复制单条消息全文 */
+  /** 复制单条消息：plain=true 复制纯文本（去 Markdown 语法），否则复制 Markdown 原文 */
   const copyMessage = useCallback(
-    async (text: string, e: ReactMouseEvent<HTMLButtonElement>) => {
+    async (
+      text: string,
+      e: ReactMouseEvent<HTMLButtonElement>,
+      plain = false,
+    ) => {
       if (!text) return;
+      const content = plain ? mdToPlainText(text) : text;
+      if (!content) return;
       let ok = false;
       try {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(content);
         ok = true;
       } catch {
         // 剪贴板 API 不可用时回退到 execCommand
         try {
           const ta = document.createElement("textarea");
-          ta.value = text;
+          ta.value = content;
           ta.style.position = "fixed";
           ta.style.opacity = "0";
           document.body.appendChild(ta);
@@ -1262,10 +1272,11 @@ export function ChatPanel() {
       }
       if (!ok) return;
       const btn = e.currentTarget;
+      const original = btn.textContent ?? "复制";
       btn.textContent = "已复制";
       btn.classList.add("msg-action-copied");
       setTimeout(() => {
-        btn.textContent = "复制";
+        btn.textContent = original;
         btn.classList.remove("msg-action-copied");
       }, 1200);
     },
@@ -2065,7 +2076,8 @@ export function ChatPanel() {
                           <button
                             type="button"
                             className="msg-action"
-                            onClick={(e) => copyMessage(m.text, e)}
+                            title="复制纯文本（去除 Markdown 语法）"
+                            onClick={(e) => copyMessage(m.text, e, true)}
                           >
                             复制
                           </button>

@@ -191,4 +191,5 @@ npx tsx test-approval.ts   # 工具审批流
 npx tsx test-audit.ts      # 审批历史审计
 npx tsx test-workdir.ts    # 工作区文件浏览器
 npx tsx test-stats.ts      # 运行统计聚合
+npx tsx test-plaintext.ts  # Markdown 转纯文本
 ```

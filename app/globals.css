@@ -1031,12 +1031,17 @@ body {
 }
 
 .msg-actions {
-  display: none;
+  display: flex;
   gap: 6px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.16s ease, visibility 0.16s ease;
 }
 
-.message:hover .msg-actions {
-  display: flex;
+.message:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+  visibility: visible;
 }
 
 .message-user .msg-actions {
