@@ -33,11 +33,14 @@ import {
   readSSE,
   RISK_LABELS,
   TODO_STATUS_LABELS,
+  toolCardStateClass,
+  toolCardStateText,
   type ApprovalCard,
   type RunStats,
   type SessionInfo,
   type SseEvent,
   type TodoItem,
+  type ToolApproval,
   type ToolCard,
   type UiMessage,
 } from "./chat-types";
@@ -361,6 +364,18 @@ export function ChatPanel() {
     setInfo(msg);
     window.setTimeout(() => setInfo((v) => (v === msg ? null : v)), 6000);
   }, []);
+
+  /** 把审批结果沉淀到对应工具卡片（供对话流追溯） */
+  const applyApprovalToCard = useCallback(
+    (id: string, action: ToolApproval["action"], reason?: string) => {
+      setCards((c) =>
+        c.map((card) =>
+          card.id === id ? { ...card, approval: { action, reason } } : card,
+        ),
+      );
+    },
+    [],
+  );
 
   // 会话搜索：本地标题过滤之外，防抖查询后端消息内容匹配
   useEffect(() => {
@@ -1037,6 +1052,13 @@ export function ChatPanel() {
             case "approval_expired": {
               if (!ev.id) break;
               setApprovals((a) => a.filter((item) => item.id !== ev.id));
+              const action: ToolApproval["action"] =
+                ev.type === "approval_expired"
+                  ? "timeout"
+                  : ev.approve
+                    ? "approved"
+                    : "denied";
+              applyApprovalToCard(ev.id, action);
               if (ev.type === "approval_expired") {
                 showNotice("审批已超时，该操作已被拒绝");
               }
@@ -1044,6 +1066,7 @@ export function ChatPanel() {
               break;
             }
             case "policy_notice": {
+              if (ev.id) applyApprovalToCard(ev.id, "denied_auto", ev.reason);
               const label = TOOL_META[ev.toolName ?? ""]?.label ?? ev.toolName ?? "";
               showNotice(`${label} 已被策略拦截：${ev.reason ?? "命中禁止规则"}`);
               break;
@@ -1073,7 +1096,7 @@ export function ChatPanel() {
         refreshStats();
       }
     },
-    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion, notifyApproval, showNotice],
+    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion, notifyApproval, showNotice, applyApprovalToCard],
   );
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
@@ -2125,10 +2148,11 @@ export function ChatPanel() {
                             <span className="card-name">
                               {TOOL_META[card.toolName]?.label ?? card.toolName}
                             </span>
-                            <span className="card-state">
-                              {card.status === "running"
-                                ? "运行中"
-                                : `${card.status === "done" ? "完成" : "失败"}${card.elapsedMs != null ? ` · ${formatDuration(card.elapsedMs)}` : ""}`}
+                            <span
+                              className={`card-state ${toolCardStateClass(card)}`}
+                              title={card.approval?.reason}
+                            >
+                              {toolCardStateText(card)}
                             </span>
                           </div>
                           <code className="card-args">
@@ -2835,10 +2859,11 @@ export function ChatPanel() {
                       <span className="card-name">
                         {TOOL_META[card.toolName]?.label ?? card.toolName}
                       </span>
-                      <span className="card-state">
-                        {card.status === "running"
-                          ? "运行中"
-                          : `${card.status === "done" ? "完成" : "失败"}${card.elapsedMs != null ? ` · ${formatDuration(card.elapsedMs)}` : ""}`}
+                      <span
+                        className={`card-state ${toolCardStateClass(card)}`}
+                        title={card.approval?.reason}
+                      >
+                        {toolCardStateText(card)}
                       </span>
                     </div>
                     <code className="card-args">

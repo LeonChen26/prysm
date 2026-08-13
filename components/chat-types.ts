@@ -9,6 +9,20 @@ export interface UiMessage {
   timestamp?: number;
 }
 
+/** 工具审批结果（沉淀到工具卡片，供对话流追溯） */
+export interface ToolApproval {
+  action: "approved" | "denied" | "timeout" | "denied_auto" | "auto";
+  reason?: string;
+}
+
+export const APPROVAL_ACTION_LABELS: Record<ToolApproval["action"], string> = {
+  approved: "已通过审批",
+  denied: "已拒绝",
+  timeout: "已超时",
+  denied_auto: "已拦截",
+  auto: "自动放行",
+};
+
 export interface ToolCard {
   id: string;
   toolName: string;
@@ -19,6 +33,38 @@ export interface ToolCard {
   startedAt?: number;
   /** 工具执行耗时（毫秒） */
   elapsedMs?: number;
+  /** 该工具调用经过的审批结果（敏感工具） */
+  approval?: ToolApproval;
+}
+
+/** 工具卡片状态文案：有审批结果优先展示审批结果，否则才是执行完成/失败 */
+export function toolCardStateText(card: ToolCard): string {
+  if (card.status === "running") return "运行中";
+  if (card.approval) return APPROVAL_ACTION_LABELS[card.approval.action];
+  const base = card.status === "done" ? "完成" : "失败";
+  return card.elapsedMs != null
+    ? `${base} · ${formatDuration(card.elapsedMs)}`
+    : base;
+}
+
+/** 工具卡片状态颜色 class（审批结果用语义色，默认灰） */
+export function toolCardStateClass(card: ToolCard): string {
+  const ap = card.approval;
+  if (ap) {
+    switch (ap.action) {
+      case "denied":
+      case "denied_auto":
+        return "card-state-danger";
+      case "timeout":
+        return "card-state-warning";
+      case "approved":
+        return "card-state-success";
+      case "auto":
+        return "card-state-brand";
+    }
+  }
+  if (card.status === "error") return "card-state-danger";
+  return "";
 }
 
 export interface TodoItem {

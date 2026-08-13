@@ -17,13 +17,16 @@
   --success: #34c759;
   --danger: #ff3b30;
   --warning: #ff9f0a;
+  --radius-sm: 10px;
   --radius: 14px;
   --radius-card: 22px;
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 18px 44px rgba(0, 0, 0, 0.12);
+  /* 阴影两档：--shadow 内嵌卡片（浅）、--shadow-lg 浮层（重，如顶部工具栏） */
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.06), 0 18px 44px rgba(0, 0, 0, 0.12);
   /* macOS/iOS 毛玻璃材质 */
   --glass-bg: rgba(255, 255, 255, 0.66);
   --glass-border: rgba(60, 60, 67, 0.12);
-  --glass-blur: blur(24px) saturate(1.8);
+  --glass-blur: blur(24px) saturate(1.5);
   --tl-dim: 1;
   --bg-glow: rgba(10, 132, 255, 0.08);
 }
@@ -50,7 +53,8 @@
   --success: #30d158;
   --danger: #ff453a;
   --warning: #ffd60a;
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 18px 44px rgba(0, 0, 0, 0.5);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.4), 0 18px 44px rgba(0, 0, 0, 0.5);
   --glass-bg: rgba(28, 28, 30, 0.66);
   --glass-border: rgba(255, 255, 255, 0.1);
   --tl-dim: 0.72;
@@ -75,7 +79,8 @@
     --success: #30d158;
     --danger: #ff453a;
     --warning: #ffd60a;
-    --shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 18px 44px rgba(0, 0, 0, 0.5);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.4), 0 18px 44px rgba(0, 0, 0, 0.5);
     --glass-bg: rgba(28, 28, 30, 0.66);
     --glass-border: rgba(255, 255, 255, 0.1);
     --tl-dim: 0.72;
@@ -136,7 +141,7 @@ body {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-card);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg);
 }
 
 .traffic-lights {
@@ -980,6 +985,7 @@ body.resizing {
   min-width: 0;
   padding-top: 7px;
   font-size: 14px;
+  line-height: 1.5;
 }
 
 /* iMessage 气泡：用户蓝色（右），Agent 系统灰（左），尾巴在发送侧；宽度随内容自适应，长内容仍有上限 */
@@ -2806,6 +2812,19 @@ body.resizing {
 .card-state {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.card-state-success {
+  color: var(--success);
+}
+.card-state-danger {
+  color: var(--danger);
+}
+.card-state-warning {
+  color: var(--warning);
+}
+.card-state-brand {
+  color: var(--brand);
 }
 
 .card-args {

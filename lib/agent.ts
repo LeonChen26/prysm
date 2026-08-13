@@ -244,7 +244,7 @@ export async function getAgent(sessionId: string): Promise<Agent> {
       if (deny.denied) {
         const reason = deny.reason ?? "该操作被策略禁止";
         logApproval(toolCall.name, args, "denied_auto", { sessionId, reason });
-        notifyApprovalNotice(toolCall.name, args, reason, sessionId);
+        notifyApprovalNotice(toolCall.id, toolCall.name, args, reason, sessionId);
         return { block: true, reason };
       }
 

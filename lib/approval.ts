@@ -37,6 +37,7 @@ export type ApprovalLifecycleEvent =
   | { type: "expired"; state: ApprovalState }
   | {
       type: "notice";
+      id?: string;
       toolName: string;
       args: unknown;
       action: "denied_auto";
@@ -148,6 +149,7 @@ export function listPendingApprovals(): ApprovalState[] {
 
 /** 推送非审批类策略通知（如 denied_auto 直接拦截） */
 export function notifyApprovalNotice(
+  id: string,
   toolName: string,
   args: unknown,
   reason: string,
@@ -155,6 +157,7 @@ export function notifyApprovalNotice(
 ): void {
   notifyLifecycle({
     type: "notice",
+    id,
     toolName,
     args,
     action: "denied_auto",

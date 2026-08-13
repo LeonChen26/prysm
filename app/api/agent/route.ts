@@ -164,6 +164,7 @@ export async function POST(req: Request) {
           if (e.sessionId && e.sessionId !== session.id) return;
           send({
             type: "policy_notice",
+            id: e.id,
             toolName: e.toolName,
             args: e.args,
             action: e.action,
