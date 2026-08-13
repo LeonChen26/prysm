@@ -1481,6 +1481,13 @@ body {
   flex-direction: column;
 }
 
+/* 展开目录的子级容器：左侧分支引导线（每层 +14px 缩进） */
+.wb-children {
+  padding-left: 7px;
+  margin-left: 6px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
 .wb-node {
   display: flex;
   align-items: center;
@@ -1503,11 +1510,30 @@ body {
   color: var(--text);
 }
 
+.wb-node-active,
+.wb-node-active:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
 .wb-arrow {
   flex-shrink: 0;
-  width: 12px;
-  font-size: 9px;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.wb-arrow svg {
+  width: 10px;
+  height: 10px;
+}
+
+.wb-arrow-open {
+  transform: rotate(90deg);
 }
 
 .wb-arrow-empty {
@@ -1516,7 +1542,26 @@ body {
 
 .wb-icon {
   flex-shrink: 0;
-  font-size: 11px;
+  width: 15px;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wb-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 目录 / 文件图标着色 */
+.wb-icon-folder {
+  color: var(--brand);
+  opacity: 0.85;
+}
+
+.wb-icon-file {
+  color: var(--text-muted);
 }
 
 .wb-name {
@@ -1596,6 +1641,8 @@ body {
 .memory-section {
   display: flex;
   flex-direction: column;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
 }
 
 .memory-head {
@@ -2034,6 +2081,8 @@ body {
 .todo-section {
   display: flex;
   flex-direction: column;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
 }
 
 /* 任务进度条 */

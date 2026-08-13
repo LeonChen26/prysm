@@ -13,6 +13,45 @@ import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 
+/** 工作区文件浏览器图标（SVG，随主题着色） */
+const WbFolderIcon = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+  </svg>
+);
+const WbFileIcon = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
+    <path d="M14 3v5h5" />
+  </svg>
+);
+const WbChevron = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M9 6l6 6-6 6" />
+  </svg>
+);
+
 /** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
 const markdownComponents = {
   table: (props: React.HTMLAttributes<HTMLTableElement>) => (
@@ -1425,50 +1464,47 @@ export function ChatPanel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [newSession]);
 
-  /** 渲染工作区目录树（递归，懒加载） */
-  const renderWbTree = (dir: string, depth: number): React.ReactNode => {
+  /** 渲染工作区目录树（递归，懒加载；缩进与分支线由 .wb-children 提供） */
+  const renderWbTree = (dir: string): React.ReactNode => {
     const entries = wbDirs[dir] ?? [];
     return entries.map((e) => {
       const childPath = dir ? `${dir}/${e.name}` : e.name;
+      const active = wbPreview?.path === childPath;
       if (e.isDir) {
+        const open = wbExpanded.has(childPath);
         return (
-          <div
-            key={childPath}
-            className="wb-row"
-            style={{ paddingLeft: 6 + depth * 14 }}
-          >
+          <div key={childPath} className="wb-row">
             <button
               type="button"
-              className="wb-node"
+              className={`wb-node${active ? " wb-node-active" : ""}`}
               onClick={() => toggleDir(childPath)}
             >
-              <span className="wb-arrow" aria-hidden="true">
-                {wbExpanded.has(childPath) ? "▾" : "▸"}
+              <span
+                className={`wb-arrow${open ? " wb-arrow-open" : ""}`}
+                aria-hidden="true"
+              >
+                <WbChevron />
               </span>
-              <span className="wb-icon" aria-hidden="true">
-                📁
+              <span className="wb-icon wb-icon-folder" aria-hidden="true">
+                <WbFolderIcon />
               </span>
               <span className="wb-name">{e.name}</span>
             </button>
-            {wbExpanded.has(childPath) && renderWbTree(childPath, depth + 1)}
+            {open && <div className="wb-children">{renderWbTree(childPath)}</div>}
           </div>
         );
       }
       return (
-        <div
-          key={childPath}
-          className="wb-row"
-          style={{ paddingLeft: 6 + depth * 14 }}
-        >
+        <div key={childPath} className="wb-row">
           <button
             type="button"
-            className="wb-node"
+            className={`wb-node${active ? " wb-node-active" : ""}`}
             onClick={() => openFile(childPath)}
             title={e.size > 0 ? `${e.size} 字节` : "空文件"}
           >
             <span className="wb-arrow wb-arrow-empty" aria-hidden="true" />
-            <span className="wb-icon" aria-hidden="true">
-              📄
+            <span className="wb-icon wb-icon-file" aria-hidden="true">
+              <WbFileIcon />
             </span>
             <span className="wb-name">{e.name}</span>
           </button>
@@ -2166,7 +2202,7 @@ export function ChatPanel() {
                   wbDirs[""].length === 0 ? (
                     <p className="wb-empty">（空）</p>
                   ) : (
-                    renderWbTree("", 0)
+                    renderWbTree("")
                   )
                 ) : (
                   <p className="wb-empty">加载中…</p>
