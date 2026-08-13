@@ -1,6 +1,12 @@
 import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { consumeStopped, getAgent, mapEvent } from "@/lib/agent";
+import {
+  consumeStopped,
+  generateTitle,
+  getAgent,
+  logRun,
+  mapEvent,
+} from "@/lib/agent";
 import { subscribeApprovals } from "@/lib/approval";
 import { rememberMessages } from "@/lib/memory";
 import {
@@ -134,10 +140,13 @@ export async function POST(req: Request) {
       );
 
       let aborted = false;
+      let runError: unknown = undefined;
+      const runStartedAt = Date.now();
       try {
         await agent!.prompt(message);
         await agent!.waitForIdle();
       } catch (err) {
+        runError = err;
         // 用户通过 /api/agent/stop 中止：区分"主动停止"与"真实错误"
         aborted =
           (err instanceof Error &&
@@ -151,20 +160,60 @@ export async function POST(req: Request) {
         }
       } finally {
         const stopped = aborted || consumeStopped(session.id);
+        const msgs = agent!.state.messages;
         // 阶段 8：持久化会话消息（全量替换）
         try {
-          saveSessionMessages(session.id, agent!.state.messages);
+          saveSessionMessages(session.id, msgs);
           // 新会话用首条用户消息自动命名
+          let renamed = false;
           if (session.title === "新会话") {
-            const firstUser = agent!.state.messages.find((m) => m.role === "user");
+            const firstUser = msgs.find((m) => m.role === "user");
             if (firstUser) {
               const t = contentText(firstUser.content).trim().slice(0, 20);
-              if (t) renameSession(session.id, t);
+              if (t) {
+                renameSession(session.id, t);
+                session.title = t;
+                renamed = true;
+              }
+            }
+          }
+          // 智能标题：仍为默认命名（首条消息截断）且已多轮对话时，用模型生成精炼标题
+          const userMsgs = msgs.filter((m) => m.role === "user");
+          const firstText = userMsgs.length
+            ? contentText(userMsgs[0].content).trim()
+            : "";
+          const isDefault =
+            session.title === "新会话" ||
+            (!!firstText && session.title === firstText.slice(0, 20));
+          if (isDefault && userMsgs.length >= 2 && !stopped && !aborted) {
+            try {
+              const better = await generateTitle(msgs);
+              if (better && better !== session.title) {
+                renameSession(session.id, better);
+                console.log(`[title] 会话标题 → "${better}"`);
+              }
+            } catch (err) {
+              console.error("[title] 自动标题生成失败:", err);
             }
           }
         } catch (err) {
           console.error("[session] 持久化失败:", err);
         }
+        // 运行日志（供前端查看最近执行记录）
+        logRun({
+          sessionId: session.id,
+          title: session.title,
+          startedAt: runStartedAt,
+          durationMs: Date.now() - runStartedAt,
+          messageCount: msgs.length,
+          stopped,
+          error:
+            !aborted && runError
+              ? runError instanceof Error
+                ? runError.message
+                : String(runError)
+              : undefined,
+        });
         // 阶段 4：把消息写入情景记忆（按内容去重，恢复的历史不会重复写入）
         try {
           const stored = rememberMessages(agent!.state.messages);

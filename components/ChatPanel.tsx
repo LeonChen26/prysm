@@ -9,7 +9,9 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
+import rehypeKatex from "rehype-katex";
 
 /** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
 const markdownComponents = {
@@ -199,10 +201,39 @@ function formatMsgTime(ts: number): string {
   return sameDay ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
-/** Markdown 代码块：hover 显示复制按钮 */
+/** 思考块：默认折叠，点击展开（模型以 ```thinking 包裹的中间推理过程） */
+function ThinkingBlock({ children }: { children?: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`thinking-block ${open ? "thinking-block-open" : ""}`}>
+      <button
+        type="button"
+        className="thinking-block-toggle"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="thinking-block-icon" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+        {open ? "收起思考过程" : "查看思考过程"}
+      </button>
+      {open && <pre className="thinking-block-body">{children}</pre>}
+    </div>
+  );
+}
+
+/** Markdown 代码块：hover 显示复制按钮；```thinking 语言渲染为折叠的思考块 */
 function CodeBlock({ children }: { children?: React.ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
+  // 检测语言标签：react-markdown 把 ```thinking 渲染为 code.language-thinking
+  const childProps = (
+    typeof children === "object" && children !== null
+      ? (children as React.ReactElement).props
+      : undefined
+  ) as { className?: string } | undefined;
+  const isThinking =
+    !!childProps && /language-thinking/i.test(String(childProps.className ?? ""));
+  if (isThinking) return <ThinkingBlock>{children}</ThinkingBlock>;
   const copy = async () => {
     if (!ref.current) return;
     try {
@@ -237,6 +268,7 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [sessionQuery, setSessionQuery] = useState("");
   /** 会话消息内容搜索结果（点击跳转到对应会话） */
@@ -258,6 +290,19 @@ export function ChatPanel() {
   >([]);
   const [memoryTotal, setMemoryTotal] = useState(0);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  /** 运行日志：最近 Agent 执行记录 + 折叠 */
+  const [runLogs, setRunLogs] = useState<
+    {
+      id: number;
+      title: string;
+      startedAt: number;
+      durationMs: number;
+      messageCount: number;
+      stopped: boolean;
+      error?: string;
+    }[]
+  >([]);
+  const [logsOpen, setLogsOpen] = useState(false);
   /** 消息编辑：正在编辑的用户消息索引（-1 表示非编辑态） */
   const [editingIndex, setEditingIndex] = useState(-1);
   /** todo 拖拽：记录被拖动的项 id */
@@ -444,6 +489,17 @@ export function ChatPanel() {
     }
   }, []);
 
+  /** 拉取最近运行日志 */
+  const refreshRunLogs = useCallback(async () => {
+    try {
+      const r = await fetch("/api/agent/logs");
+      const data = await r.json();
+      if (Array.isArray(data?.logs)) setRunLogs(data.logs);
+    } catch {
+      /* 静默 */
+    }
+  }, []);
+
   /** 删除单条情景记忆 */
   const removeMemory = useCallback(
     async (id: number) => {
@@ -478,10 +534,85 @@ export function ChatPanel() {
     }
   }, [memoryTotal]);
 
+  /** 清空运行日志 */
+  const clearRunLogs = useCallback(async () => {
+    try {
+      await fetch("/api/agent/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear" }),
+      });
+      setRunLogs([]);
+    } catch {
+      setError("清空日志失败");
+    }
+  }, []);
+
   // 初始拉取情景记忆数量
   useEffect(() => {
     refreshMemory();
   }, [refreshMemory]);
+  // 初始拉取运行日志
+  useEffect(() => {
+    refreshRunLogs();
+  }, [refreshRunLogs]);
+
+  /** 导出全部数据备份（下载 JSON） */
+  const exportBackup = useCallback(async () => {
+    try {
+      const r = await fetch("/api/backup");
+      if (!r.ok) throw new Error("备份导出失败");
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      const date = new Date();
+      const stamp = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}-${String(date.getHours()).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}`;
+      a.href = URL.createObjectURL(blob);
+      a.download = `workbuddy-backup-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  /** 从备份 JSON 文件恢复（清空重建） */
+  const restoreBackup = useCallback(
+    async (file: File) => {
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const r = await fetch("/api/backup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        const res = await r.json();
+        if (!r.ok || !res.ok) {
+          throw new Error(res.error ?? "恢复失败");
+        }
+        setError(null);
+        setInfo(
+          `恢复完成：${res.sessions} 个会话、${res.messages} 条消息、${res.memory} 条记忆、${res.todos} 个任务`,
+        );
+        // 恢复后刷新会话与记忆
+        const sessionsRes = await fetch("/api/sessions");
+        const sessionsData = await sessionsRes.json();
+        const list = (sessionsData?.sessions ?? []) as SessionInfo[];
+        setSessions(list);
+        if (list.length > 0) await switchSession(list[0].id);
+        else {
+          setSessionId(null);
+          setMessages([]);
+        }
+        refreshMemory();
+      } catch (err) {
+        setError(err instanceof Error ? `恢复失败: ${err.message}` : String(err));
+      }
+    },
+    [switchSession, refreshMemory],
+  );
 
   /** 置顶 / 取消置顶会话 */
   const togglePin = useCallback(
@@ -681,9 +812,10 @@ export function ChatPanel() {
         busyRef.current = false;
         refreshSessions();
         refreshMemory();
+        refreshRunLogs();
       }
     },
-    [sessionId, refreshSessions, refreshMemory],
+    [sessionId, refreshSessions, refreshMemory, refreshRunLogs],
   );
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
@@ -1274,6 +1406,32 @@ export function ChatPanel() {
               })()
             )}
           </div>
+          <div className="session-foot">
+            <button
+              type="button"
+              className="session-foot-btn"
+              onClick={exportBackup}
+              title="导出全部会话、记忆与任务计划"
+            >
+              ⬇ 备份
+            </button>
+            <label
+              className="session-foot-btn session-foot-btn-accent"
+              title="从备份 JSON 恢复（会覆盖当前数据）"
+            >
+              ⬆ 恢复
+              <input
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) restoreBackup(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
         </aside>
 
         <section className="chat">
@@ -1346,8 +1504,8 @@ export function ChatPanel() {
                       <>
                         <div className="md">
                           <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            rehypePlugins={[rehypeHighlight]}
+                            remarkPlugins={[remarkGfm, remarkMath]}
+                            rehypePlugins={[rehypeHighlight, rehypeKatex]}
                             components={{ ...markdownComponents, pre: CodeBlock }}
                           >
                             {m.text}
@@ -1380,6 +1538,14 @@ export function ChatPanel() {
                             onClick={(e) => copyMessage(m.text, e)}
                           >
                             复制
+                          </button>
+                          <button
+                            type="button"
+                            className="msg-action"
+                            title="复制 Markdown 原文"
+                            onClick={(e) => copyMessage(m.text, e)}
+                          >
+                            复制 MD
                           </button>
                           {m.role === "user" && (
                             <button
@@ -1414,6 +1580,7 @@ export function ChatPanel() {
                 </div>
               );
             })}
+            {info && <div className="info-banner">{info}</div>}
             {error && <div className="error-banner">{error}</div>}
           </div>
 
@@ -1536,6 +1703,57 @@ export function ChatPanel() {
                 }}
               >
                 {memoryOpen ? "收起记忆" : "查看记忆"}
+              </button>
+            </div>
+            <div className="logs-section">
+              <div className="panel-title logs-head">
+                <h2>运行日志</h2>
+                <span className="panel-count">{runLogs.length}</span>
+              </div>
+              {logsOpen && runLogs.length > 0 && (
+                <div className="logs-body">
+                  {runLogs.map((l) => (
+                    <div
+                      key={l.id}
+                      className={`log-item ${l.error ? "log-item-error" : l.stopped ? "log-item-stopped" : "log-item-done"}`}
+                    >
+                      <div className="log-item-head">
+                        <span className="log-title">{l.title || "未命名会话"}</span>
+                        <span className="log-state">
+                          {l.error ? "错误" : l.stopped ? "停止" : "完成"}
+                        </span>
+                      </div>
+                      <div className="log-item-meta">
+                        <span>{formatMsgTime(l.startedAt)}</span>
+                        <span>{formatDuration(l.durationMs)}</span>
+                        <span>{l.messageCount} 条消息</span>
+                      </div>
+                      {l.error && (
+                        <p className="log-error">{l.error.slice(0, 140)}</p>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="logs-clear"
+                    onClick={clearRunLogs}
+                  >
+                    清空日志
+                  </button>
+                </div>
+              )}
+              {logsOpen && runLogs.length === 0 && (
+                <p className="logs-empty">暂无运行记录</p>
+              )}
+              <button
+                type="button"
+                className="logs-toggle"
+                onClick={() => {
+                  setLogsOpen((v) => !v);
+                  if (!logsOpen) refreshRunLogs();
+                }}
+              >
+                {logsOpen ? "收起日志" : "查看日志"}
               </button>
             </div>
             {approvals.length > 0 && (

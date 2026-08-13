@@ -692,6 +692,43 @@ body {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent);
 }
 
+/* 会话面板底部：备份 / 恢复 */
+.session-foot {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.session-foot-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.session-foot-btn:hover {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+  color: var(--brand);
+}
+
+.session-foot-btn-accent {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
 /* ---------- Chat ---------- */
 .chat {
   display: flex;
@@ -1030,6 +1067,14 @@ body {
   font-size: 13px;
 }
 
+.info-banner {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+  font-size: 13px;
+}
+
 /* ---------- Input bar ---------- */
 .input-bar {
   display: flex;
@@ -1318,6 +1363,129 @@ body {
 }
 
 .memory-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 8px 2px 0;
+}
+
+/* ---------- 运行日志面板 ---------- */
+.logs-section {
+  display: flex;
+  flex-direction: column;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.logs-head {
+  margin-bottom: 4px;
+}
+
+.logs-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.log-item {
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.log-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.log-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-state {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+
+.log-item-done .log-state {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.log-item-stopped .log-state {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+
+.log-item-error .log-state {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.log-item-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.log-error {
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--danger);
+  word-break: break-all;
+}
+
+.logs-clear {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.logs-clear:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.logs-toggle {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 3px 0;
+  border: none;
+  background: transparent;
+  color: var(--brand);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.logs-toggle:hover {
+  text-decoration: underline;
+}
+
+.logs-empty {
   font-size: 11px;
   color: var(--text-muted);
   padding: 8px 2px 0;
@@ -1858,6 +2026,65 @@ body {
 /* 代码块复制按钮（hover 显示） */
 .code-block {
   position: relative;
+}
+
+/* 思考块：默认折叠，点击展开中间推理过程 */
+.thinking-block {
+  margin: 0.8em 0;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.thinking-block-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.thinking-block-toggle:hover {
+  color: var(--text);
+  background: var(--surface-filled);
+}
+
+.thinking-block-icon {
+  font-size: 10px;
+}
+
+.thinking-block-body {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* LaTeX 公式在气泡内的观感微调 */
+.md .katex {
+  font-size: 1.05em;
+}
+
+.md .katex-display {
+  margin: 0.7em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
 }
 
 .code-copy {

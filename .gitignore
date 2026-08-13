@@ -6,6 +6,7 @@ out/
 agent-workdir/
 agent-memory.db
 sessions.db
+todo.db
 *.log
 .DS_Store
 tsconfig.tsbuildinfo

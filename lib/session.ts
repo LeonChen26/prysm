@@ -238,3 +238,46 @@ export function searchSessionMessages(
   }
   return hits;
 }
+
+/** 导出全部会话与消息（供备份恢复，保留 id/时间/置顶） */
+export function dumpAllSessions(): {
+  sessions: SessionInfo[];
+  messagesBySession: Record<string, AgentMessage[]>;
+} {
+  const sessions = listSessions();
+  const messagesBySession: Record<string, AgentMessage[]> = {};
+  for (const s of sessions) {
+    messagesBySession[s.id] = getSessionMessages(s.id);
+  }
+  return { sessions, messagesBySession };
+}
+
+/** 清空并重建会话库（事务），返回导入的会话数 */
+export function restoreAllSessions(
+  sessions: SessionInfo[],
+  messagesBySession: Record<string, AgentMessage[]>,
+): number {
+  const d = getDb();
+  d.exec("BEGIN");
+  try {
+    d.exec("DELETE FROM session_messages");
+    d.exec("DELETE FROM sessions");
+    const insS = d.prepare(
+      "INSERT INTO sessions (id, title, created_at, updated_at, pinned) VALUES (?, ?, ?, ?, ?)",
+    );
+    const insM = d.prepare(
+      "INSERT INTO session_messages (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
+    );
+    for (const s of sessions) {
+      insS.run(s.id, s.title, s.createdAt, s.updatedAt, s.pinned ?? 0);
+      for (const m of messagesBySession[s.id] ?? []) {
+        insM.run(s.id, m.role, JSON.stringify(m), m.timestamp ?? Date.now());
+      }
+    }
+    d.exec("COMMIT");
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+  return sessions.length;
+}

@@ -191,3 +191,43 @@ export function clearEpisodes(): number {
   d.exec("DELETE FROM episodes");
   return before.n;
 }
+
+/** 导出全部记忆（供备份恢复） */
+export function dumpEpisodes(): MemoryEpisode[] {
+  return listEpisodes(10_000, 0);
+}
+
+/** 清空并重建记忆库（事务），保留原 id 与时间，返回导入条数 */
+export function restoreEpisodes(episodes: MemoryEpisode[]): number {
+  const d = getDb();
+  d.exec("BEGIN");
+  try {
+    d.exec("DELETE FROM episodes_fts");
+    d.exec("DELETE FROM episodes");
+    const ins = d.prepare(
+      "INSERT OR IGNORE INTO episodes (id, role, content, ts) VALUES (?, ?, ?, ?)",
+    );
+    const insFts = d.prepare(
+      "INSERT OR IGNORE INTO episodes_fts (rowid, content) VALUES (?, ?)",
+    );
+    let stored = 0;
+    for (const e of episodes) {
+      if (!e || typeof e.content !== "string" || !e.content.trim()) continue;
+      const r = ins.run(
+        e.id,
+        e.role ?? "assistant",
+        e.content,
+        e.ts ?? Date.now(),
+      );
+      if (r.changes > 0) {
+        insFts.run(Number(e.id), tokenizeForFts(e.content));
+        stored++;
+      }
+    }
+    d.exec("COMMIT");
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+  return episodes.length;
+}

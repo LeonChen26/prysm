@@ -33,7 +33,8 @@ export const SYSTEM_PROMPT = `你是 WorkBuddy Agent —— 一个能自主完�
 2. 对需要多个步骤的复杂任务，先用 todo_create 将任务拆解为清晰的步骤清单；开始执行某一步前用 todo_modify 把它标记为 in_progress，每完成一步标记为 completed；中途如需调整清单，用 todo_modify 追加或修改，不要重复调用 todo_create 覆盖整个清单。
 3. 工具调用失败时，分析错误原因，尝试换个参数或换一种方式重试。
 4. 任务完成后，用 verify_file 自检关键交付物（确认文件存在、内容符合预期），校验失败时分析原因并修正后重新校验，再向用户总结做了什么、结果如何。
-5. 用户意图不明确时，先向用户确认，不要擅自猜测。`;
+5. 用户意图不明确时，先向用户确认，不要擅自猜测。
+6. 需要向用户展示中间推理过程（如分步推导、方案权衡）时，用 \`\`\`thinking 语言标签的代码块包裹该部分内容，前端会将其折叠显示；最终结论写在思考块之外。`;
 
 let models: ReturnType<typeof createModels> | undefined;
 /** 按会话缓存 Agent 实例：切换会话即切换实例，历史消息在构造时恢复 */
@@ -98,6 +99,59 @@ async function summarize(oldMessages: AgentMessage[]): Promise<string> {
     ],
   });
   return contentText(reply.content);
+}
+
+/** 为会话生成精炼标题（默认命名且对话多轮时调用），失败时返回空串 */
+export async function generateTitle(
+  messages: AgentMessage[],
+): Promise<string> {
+  const first = messages.find((mm) => mm.role === "user");
+  if (!first) return "";
+  const m = await ensureModels();
+  const model = m.getModel(DEFAULT_PROVIDER, DEFAULT_MODEL);
+  if (!model) return "";
+  const reply = await m.completeSimple(model, {
+    systemPrompt:
+      "你是会话标题生成器。根据对话内容生成一个 12 字以内的中文标题，只输出标题本身，不要引号、不要标点、不要多余解释。",
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "text", text: messageText(first).slice(0, 200) }],
+        timestamp: Date.now(),
+      },
+    ],
+  });
+  return contentText(reply.content).trim().replace(/["""'']/g, "").slice(0, 20);
+}
+
+/** 运行日志条目（内存，上限 50 条） */
+export interface RunLogEntry {
+  id: number;
+  sessionId: string;
+  title: string;
+  startedAt: number;
+  durationMs: number;
+  messageCount: number;
+  stopped: boolean;
+  error?: string;
+}
+
+const runLogs: RunLogEntry[] = [];
+
+/** 记录一次 Agent 运行 */
+export function logRun(entry: Omit<RunLogEntry, "id">): void {
+  runLogs.unshift({ id: Date.now(), ...entry });
+  if (runLogs.length > 50) runLogs.pop();
+}
+
+/** 最近运行日志（新在前） */
+export function getRunLogs(): RunLogEntry[] {
+  return runLogs.slice();
+}
+
+/** 清空运行日志 */
+export function clearRunLogs(): void {
+  runLogs.length = 0;
 }
 
 /**

@@ -12,13 +12,16 @@
 - **并行工具执行**：单条消息含多个工具调用时并行执行，可切换为串行
 - **联网搜索**：bing（默认，国内可直连）/ duckduckgo
 - **系统工具**：`env_info` 查看运行环境、`port_check` 排查端口占用
-- **待办清单**：任务拆解为步骤卡片，支持拖拽排序 / 删除 / 追加，实时展示进度与耗时
+- **待办清单**：任务拆解为步骤卡片，支持拖拽排序 / 删除 / 追加，实时展示进度与耗时；清单持久化到 `todo.db`，重启不丢失
 - **会话管理**：重命名 / 置顶 / 批量删除 / 清空消息 / 导出为 Markdown 或 JSON
+- **数据备份恢复**：一键导出 / 导入全部会话、记忆与任务计划（侧栏「备份 / 恢复」）
 - **会话搜索**：按关键词搜索会话标题与消息内容，命中片段点击直达
-- **消息操作**：复制文本 / 编辑用户消息后重发（截断后续历史重新生成）/ 重新生成回复 / 删除单条消息
+- **消息操作**：复制文本 / 复制 Markdown / 编辑用户消息后重发（截断后续历史重新生成）/ 重新生成回复 / 删除单条消息
 - **代码高亮**：助手消息中的代码块语法高亮，支持一键复制，超长代码块内部滚动
-- **渲染体验**：GFM 任务列表 checkbox、消息时间显示、流式打字机光标、消息平滑淡入
+- **渲染体验**：LaTeX 公式（KaTeX）、`thinking` 代码块折叠为思考过程、GFM 任务列表 checkbox、消息时间显示、流式打字机光标、消息平滑淡入
 - **命令执行**：`run_bash` 工具在工作区内执行 shell 命令（需审批）
+- **运行日志**：记录每次 Agent 执行（耗时 / 消息数 / 结果），侧栏可查看
+- **智能标题**：对话多轮后自动生成精炼会话标题
 
 ## 环境要求
 
@@ -116,10 +119,13 @@ pm2 start .next/standalone/server.js --name workbuddy-agent
 | `POST /api/agent` | 发送消息，SSE 流式返回 Agent 事件 |
 | `POST /api/agent/stop` | 停止当前会话的 Agent |
 | `POST /api/agent/approve` | 审批操作（同意 / 拒绝） |
+| `GET /api/agent/logs` | 最近 Agent 运行日志（`POST` 传 `{ action: "clear" }` 清空） |
 | `POST /api/todos` | 待办操作（append / remove / reorder） |
 | `GET /api/memory` | 情景记忆列表（`?limit=&offset=`） |
 | `DELETE /api/memory?id=xxx` | 删除单条记忆 |
 | `POST /api/memory` | 清空全部记忆（`{ action: "clear" }`） |
+| `GET /api/backup` | 导出全部数据（会话 + 记忆 + 任务计划）为 JSON |
+| `POST /api/backup` | 导入备份并清空重建 |
 
 ## 环境变量
 
@@ -150,6 +156,7 @@ pm2 start .next/standalone/server.js --name workbuddy-agent
 | `agent-workdir/` | Agent 文件工具的工作区，所有读写被限制在此目录内 |
 | `sessions.db` | 会话与消息历史（SQLite） |
 | `agent-memory.db` | 情景记忆库（SQLite） |
+| `todo.db` | 任务计划持久化（SQLite） |
 
 > 三者在 standalone 产物中位于运行目录下，部署时注意持久化挂载。
 
