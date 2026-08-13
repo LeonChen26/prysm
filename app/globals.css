@@ -413,6 +413,10 @@ body {
   transition: opacity 0.15s ease, transform 0.05s ease;
 }
 
+.input-bar .btn-stop {
+  background: var(--danger);
+}
+
 .input-bar button:disabled {
   opacity: 0.45;
   cursor: not-allowed;

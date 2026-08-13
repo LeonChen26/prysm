@@ -44,6 +44,7 @@ interface SseEvent {
     | "turn_end"
     | "agent_end"
     | "approval_required"
+    | "stopped"
     | "error"
     | "done";
   delta?: string;
@@ -279,6 +280,9 @@ export function ChatPanel() {
               { id: ev.id!, toolName: ev.toolName!, args: ev.args },
             ]);
             break;
+          case "stopped":
+            setError(ev.message ?? "任务已停止");
+            break;
           case "error":
             setError(ev.message ?? "发生错误");
             break;
@@ -307,6 +311,20 @@ export function ChatPanel() {
       setError(err instanceof Error ? err.message : String(err));
     }
   }, []);
+
+  /** 中断当前正在执行的任务 */
+  const stop = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await fetch("/api/agent/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+    } catch {
+      /* SSE 流会自行结束 */
+    }
+  }, [sessionId]);
 
   return (
     <div className="app">
@@ -406,9 +424,15 @@ export function ChatPanel() {
               placeholder="描述你要完成的任务…"
               disabled={busy}
             />
-            <button type="submit" disabled={busy || !input.trim()}>
-              发送
-            </button>
+            {busy ? (
+              <button type="button" className="btn-stop" onClick={stop}>
+                停止
+              </button>
+            ) : (
+              <button type="submit" disabled={!input.trim()}>
+                发送
+              </button>
+            )}
           </form>
         </section>
 

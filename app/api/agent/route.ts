@@ -1,6 +1,6 @@
 import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { getAgent, mapEvent } from "@/lib/agent";
+import { consumeStopped, getAgent, mapEvent } from "@/lib/agent";
 import { subscribeApprovals } from "@/lib/approval";
 import { rememberMessages } from "@/lib/memory";
 import {
@@ -112,15 +112,24 @@ export async function POST(req: Request) {
         }),
       );
 
+      let aborted = false;
       try {
         await agent!.prompt(message);
         await agent!.waitForIdle();
       } catch (err) {
-        send({
-          type: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
+        // 用户通过 /api/agent/stop 中止：区分"主动停止"与"真实错误"
+        aborted =
+          (err instanceof Error &&
+            (err.name === "AbortError" || /abort/i.test(err.message))) ||
+          !!agent!.signal?.aborted;
+        if (!aborted) {
+          send({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
       } finally {
+        const stopped = aborted || consumeStopped(session.id);
         // 阶段 8：持久化会话消息（全量替换）
         try {
           saveSessionMessages(session.id, agent!.state.messages);
@@ -144,7 +153,11 @@ export async function POST(req: Request) {
         }
         unsubApprovals();
         unsub();
-        send({ type: "done" });
+        send(
+          stopped
+            ? { type: "stopped", message: "任务已停止" }
+            : { type: "done" },
+        );
         try {
           controller.close();
         } catch {

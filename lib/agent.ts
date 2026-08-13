@@ -37,6 +37,17 @@ export const SYSTEM_PROMPT = `你是 WorkBuddy Agent —— 一个能自主完�
 let models: ReturnType<typeof createModels> | undefined;
 /** 按会话缓存 Agent 实例：切换会话即切换实例，历史消息在构造时恢复 */
 const agentPool = new Map<string, Agent>();
+/** 记录被用户主动停止的会话（run 结束后由路由消费） */
+const stoppedSessions = new Set<string>();
+
+export function markStopped(sessionId: string): void {
+  stoppedSessions.add(sessionId);
+}
+
+/** 消费"是否被停止"标记并返回结果 */
+export function consumeStopped(sessionId: string): boolean {
+  return stoppedSessions.delete(sessionId);
+}
 
 async function ensureModels(): Promise<ReturnType<typeof createModels>> {
   if (models) return models;
@@ -122,6 +133,11 @@ async function buildContext(
     console.log("[memory] 本次检索无命中，未注入");
   }
   return base;
+}
+
+/** 从池中取指定会话的 Agent（不存在返回 undefined，不创建） */
+export function getAgentForSession(sessionId: string): Agent | undefined {
+  return agentPool.get(sessionId);
 }
 
 /** 获取指定会话的 Agent（不存在则用历史消息新建，实现会话恢复） */
