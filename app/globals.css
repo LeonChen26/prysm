@@ -119,8 +119,9 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  /* 宽度自适应：大屏时整体加宽，超宽屏仍限宽居中保证可读性 */
-  max-width: 1440px;
+  /* 整体宽度自适应：窄屏铺满（两侧留 16px），超宽屏限 1720px 居中保持可读 */
+  width: 100%;
+  max-width: min(100% - 32px, 1720px);
   margin: 0 auto;
   padding: 0 20px;
 }
