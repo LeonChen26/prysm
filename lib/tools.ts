@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { exec } from "node:child_process";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
@@ -101,6 +102,32 @@ function resolveInWorkdir(relative: string): string {
   return resolved;
 }
 
+interface CommandResult {
+  exitCode: number;
+  output: string;
+}
+
+/** 在指定目录执行 shell 命令（超时后终止，输出截断到 8000 字符） */
+function runCommand(
+  command: string,
+  cwd: string,
+  timeoutMs = 30_000,
+): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    exec(
+      command,
+      { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        const output = [stdout, stderr].filter(Boolean).join("\n");
+        const exitCode = err
+          ? (err as { code?: number }).code ?? -1
+          : 0;
+        resolve({ exitCode, output });
+      },
+    );
+  });
+}
+
 /**
  * 各工具 execute 收到的参数（运行时来自模型 JSON，Schema 校验由框架完成）。
  * 必需字段由各自 schema 保证存在，这里仅供 TS 静态检查。
@@ -113,6 +140,7 @@ interface ToolArgs {
   to: string;
   query: string;
   url: string;
+  command: string;
   items: { title: string; detail?: string }[];
   expect?: string;
   limit?: number;
@@ -526,6 +554,30 @@ export const tools: AgentTool<any>[] = [
           },
         ],
         details: { query: params.query, count: hits.length, hits },
+      };
+    },
+  },
+  {
+    name: "run_bash",
+    label: "执行命令",
+    description:
+      "在工作区（agent-workdir）目录下执行 shell 命令（Linux/macOS 为 bash，Windows 为 cmd）。返回命令输出（最多 8000 字符）。属于敏感操作，需要用户确认。适合运行脚本、构建、查看环境等操作。",
+    parameters: Type.Object({
+      command: Type.String({ description: "要执行的 shell 命令" }),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
+      const { exitCode, output } = await runCommand(params.command, AGENT_WORKDIR);
+      const truncated =
+        output.length > 8000 ? output.slice(0, 8000) + "\n...(输出已截断)" : output;
+      return {
+        content: [
+          {
+            type: "text",
+            text: `[exit ${exitCode}]\n${truncated || "(无输出)"}`,
+          },
+        ],
+        details: { command: params.command, exitCode, truncated: output.length > 8000 },
       };
     },
   },

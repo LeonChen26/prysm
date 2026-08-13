@@ -220,6 +220,10 @@ export function ChatPanel() {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [sessionQuery, setSessionQuery] = useState("");
+  /** 会话消息内容搜索结果（点击跳转到对应会话） */
+  const [searchResults, setSearchResults] = useState<
+    { sessionId: string; title: string; snippet: string }[]
+  >([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
@@ -272,6 +276,25 @@ export function ChatPanel() {
     });
   }, [applyTheme]);
 
+  // 会话搜索：本地标题过滤之外，防抖查询后端消息内容匹配
+  useEffect(() => {
+    const q = sessionQuery.trim();
+    if (!q) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/sessions/search?q=${encodeURIComponent(q)}`);
+        const data = await r.json();
+        if (Array.isArray(data?.results)) setSearchResults(data.results);
+      } catch {
+        /* 静默 */
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [sessionQuery]);
+
   // 加载会话列表，并选中最近的会话
   useEffect(() => {
     fetch("/api/sessions")
@@ -311,6 +334,17 @@ export function ChatPanel() {
       }
     },
     [busy],
+  );
+
+  /** 从搜索结果跳转到对应会话 */
+  const jumpToSession = useCallback(
+    async (id: string) => {
+      if (busy) return;
+      setSessionQuery("");
+      setSearchResults([]);
+      await switchSession(id);
+    },
+    [busy, switchSession],
   );
 
   /** 新建会话 */
@@ -962,9 +996,25 @@ export function ChatPanel() {
             <input
               value={sessionQuery}
               onChange={(e) => setSessionQuery(e.target.value)}
-              placeholder="搜索会话…"
+              placeholder="搜索会话 / 消息…"
             />
           </div>
+          {sessionQuery.trim() && searchResults.length > 0 && (
+            <div className="search-results">
+              <p className="search-results-label">消息匹配</p>
+              {searchResults.map((r) => (
+                <button
+                  key={r.sessionId}
+                  type="button"
+                  className="search-result-item"
+                  onClick={() => jumpToSession(r.sessionId)}
+                >
+                  <span className="search-result-title">{r.title || "未命名会话"}</span>
+                  <span className="search-result-snippet">{r.snippet}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="session-scroll">
             {sessions.length === 0 ? (
               <p className="session-empty">还没有会话</p>
@@ -1189,15 +1239,20 @@ export function ChatPanel() {
                   </div>
                   <div className="message-body">
                     {m.text ? (
-                      <div className="md">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[rehypeHighlight]}
-                          components={{ ...markdownComponents, pre: CodeBlock }}
-                        >
-                          {m.text}
-                        </ReactMarkdown>
-                      </div>
+                      <>
+                        <div className="md">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            rehypePlugins={[rehypeHighlight]}
+                            components={{ ...markdownComponents, pre: CodeBlock }}
+                          >
+                            {m.text}
+                          </ReactMarkdown>
+                        </div>
+                        {busy && i === messages.length - 1 && m.role === "assistant" && (
+                          <span className="cursor-blink" aria-hidden="true" />
+                        )}
+                      </>
                     ) : busy && i === messages.length - 1 ? (
                       <span className="thinking" aria-label="思考中">
                         <span className="thinking-dot" />

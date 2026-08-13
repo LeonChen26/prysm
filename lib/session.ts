@@ -168,3 +168,59 @@ export function saveSessionMessages(
   }
   touchSession(sessionId);
 }
+
+export interface SearchHit {
+  sessionId: string;
+  title: string;
+  snippet: string;
+}
+
+/** 提取消息纯文本（与 contentText 等价，避免依赖 pi-ai） */
+function msgText(m: AgentMessage): string {
+  if (!("content" in m) || m.content == null) return "";
+  const c = m.content;
+  if (typeof c === "string") return c;
+  return c
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** 在会话消息内容中搜索关键词，返回命中的会话与片段（每个会话最多 1 条，按最新命中） */
+export function searchSessionMessages(
+  query: string,
+  limit = 20,
+): SearchHit[] {
+  const q = `%${query}%`;
+  const d = getDb();
+  const rows = d
+    .prepare(
+      `SELECT m.session_id AS sid, s.title AS title, m.content AS content
+       FROM session_messages m
+       JOIN sessions s ON s.id = m.session_id
+       WHERE m.content LIKE ?
+       ORDER BY m.id DESC
+       LIMIT 300`,
+    )
+    .all(q) as { sid: string; title: string; content: string }[];
+  const hits: SearchHit[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (seen.has(r.sid) || hits.length >= limit) continue;
+    let text = "";
+    try {
+      text = msgText(JSON.parse(r.content) as AgentMessage);
+    } catch {
+      continue;
+    }
+    if (!text) continue;
+    const idx = text.indexOf(query);
+    if (idx < 0) continue;
+    const start = Math.max(0, idx - 30);
+    const snippet =
+      (start > 0 ? "…" : "") + text.slice(start, idx + query.length + 60);
+    seen.add(r.sid);
+    hits.push({ sessionId: r.sid, title: r.title, snippet });
+  }
+  return hits;
+}

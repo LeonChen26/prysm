@@ -76,7 +76,7 @@ const KEY_ENV: Record<ProviderId, string> = {
 };
 
 /** 需要用户审批的敏感工具 */
-const SENSITIVE_TOOLS = new Set(["write_file", "delete_file"]);
+const SENSITIVE_TOOLS = new Set(["write_file", "delete_file", "run_bash"]);
 
 /** 对最早的一批消息生成摘要（由同一模型完成，非流式） */
 async function summarize(oldMessages: AgentMessage[]): Promise<string> {
