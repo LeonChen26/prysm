@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface UiMessage {
   role: "user" | "assistant";
@@ -82,19 +84,21 @@ async function readSSE(response: Response, onEvent: (ev: SseEvent) => void) {
   }
 }
 
-const TOOL_LABELS: Record<string, string> = {
-  list_dir: "列出目录",
-  read_file: "读取文件",
-  write_file: "写入文件",
-  append_file: "追加写入",
-  create_dir: "创建目录",
-  move_file: "移动/重命名",
-  copy_file: "复制文件",
-  delete_file: "删除文件",
-  verify_file: "校验文件",
-  todo_create: "创建任务计划",
-  todo_modify: "更新任务计划",
-  todo_list: "查看任务计划",
+const TOOL_META: Record<string, { label: string; type: string }> = {
+  list_dir: { label: "列出目录", type: "文件" },
+  read_file: { label: "读取文件", type: "文件" },
+  write_file: { label: "写入文件", type: "文件" },
+  append_file: { label: "追加写入", type: "文件" },
+  create_dir: { label: "创建目录", type: "文件" },
+  move_file: { label: "移动/重命名", type: "文件" },
+  copy_file: { label: "复制文件", type: "文件" },
+  delete_file: { label: "删除文件", type: "文件" },
+  verify_file: { label: "校验文件", type: "文件" },
+  todo_create: { label: "创建任务计划", type: "任务" },
+  todo_modify: { label: "更新任务计划", type: "任务" },
+  todo_list: { label: "查看任务计划", type: "任务" },
+  web_search: { label: "网页搜索", type: "网络" },
+  fetch_url: { label: "抓取网页", type: "网络" },
 };
 
 const TODO_STATUS_LABELS: Record<TodoItem["status"], string> = {
@@ -400,7 +404,11 @@ export function ChatPanel() {
                 <div className="message-role">{m.role === "user" ? "你" : "Agent"}</div>
                 <div className="message-body">
                   {m.text ? (
-                    <p style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.text}</p>
+                    <div className="md">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {m.text}
+                      </ReactMarkdown>
+                    </div>
                   ) : (
                     <span className="cursor-blink" />
                   )}
@@ -447,7 +455,7 @@ export function ChatPanel() {
                 {approvals.map((a) => (
                   <div key={a.id} className="approval-card">
                     <div className="approval-title">
-                      需要确认：{TOOL_LABELS[a.toolName] ?? a.toolName}
+                      需要确认：{TOOL_META[a.toolName]?.label ?? a.toolName}
                     </div>
                     <code className="approval-args">
                       {JSON.stringify(a.args)?.slice(0, 120)}
@@ -513,9 +521,12 @@ export function ChatPanel() {
                     className={`card card-${card.status}`}
                   >
                     <div className="card-head">
+                      <span className={`card-badge card-badge-${card.status}`}>
+                        {TOOL_META[card.toolName]?.type ?? "工具"}
+                      </span>
                       <span className="card-status" aria-hidden="true" />
                       <span className="card-name">
-                        {TOOL_LABELS[card.toolName] ?? card.toolName}
+                        {TOOL_META[card.toolName]?.label ?? card.toolName}
                       </span>
                       <span className="card-state">
                         {card.status === "running"
