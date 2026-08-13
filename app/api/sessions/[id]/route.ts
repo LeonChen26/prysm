@@ -1,7 +1,12 @@
 import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { getAgent } from "@/lib/agent";
-import { deleteSession, getSession, renameSession } from "@/lib/session";
+import {
+  deleteSession,
+  getSession,
+  pinSession,
+  renameSession,
+} from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +45,7 @@ export async function GET(
   }
 }
 
-/** PATCH /api/sessions/:id —— 重命名会话 */
+/** PATCH /api/sessions/:id —— 重命名或置顶会话 */
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -52,6 +57,13 @@ export async function PATCH(
       return Response.json({ error: "会话不存在" }, { status: 404 });
     }
     const body = await req.json().catch(() => null);
+    if (body && typeof body.pinned === "boolean") {
+      pinSession(id, body.pinned);
+      return Response.json({
+        ok: true,
+        session: { ...session, pinned: body.pinned ? 1 : 0 },
+      });
+    }
     const title = String(body?.title ?? "").trim();
     if (!title) {
       return Response.json({ error: "title 不能为空" }, { status: 400 });

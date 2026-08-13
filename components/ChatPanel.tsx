@@ -9,6 +9,23 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+
+/** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
+const markdownComponents = {
+  table: (props: React.HTMLAttributes<HTMLTableElement>) => (
+    <table className="md-table" {...props} />
+  ),
+  img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+    <span className="md-img-wrap">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img loading="lazy" {...props} alt={props.alt ?? ""} />
+    </span>
+  ),
+  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a target="_blank" rel="noopener noreferrer" {...props} />
+  ),
+};
 
 interface UiMessage {
   role: "user" | "assistant";
@@ -45,6 +62,7 @@ interface SessionInfo {
   title: string;
   createdAt: number;
   updatedAt: number;
+  pinned?: number;
 }
 
 interface SseEvent {
@@ -348,6 +366,65 @@ export function ChatPanel() {
       /* 静默 */
     }
   }, []);
+
+  /** 置顶 / 取消置顶会话 */
+  const togglePin = useCallback(
+    async (id: string) => {
+      try {
+        const s = sessions.find((x) => x.id === id);
+        if (!s) return;
+        const pinned = !(s.pinned === 1);
+        const r = await fetch(`/api/sessions/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pinned }),
+        });
+        if (!r.ok) throw new Error("置顶失败");
+        setSessions((list) =>
+          list.map((x) => (x.id === id ? { ...x, pinned: pinned ? 1 : 0 } : x)),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [sessions],
+  );
+
+  /** 导出会话为 Markdown / JSON 文件 */
+  const exportSession = useCallback(
+    (id: string, format: "md" | "json") => {
+      const s = sessions.find((x) => x.id === id);
+      if (!s) return;
+      const a = document.createElement("a");
+      a.href = `/api/sessions/${id}/export?format=${format}`;
+      a.download = `${s.title || "会话"}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    },
+    [sessions],
+  );
+
+  /** 清空会话消息（保留会话） */
+  const clearSession = useCallback(
+    async (id: string) => {
+      try {
+        const r = await fetch(`/api/sessions/${id}/clear`, { method: "POST" });
+        if (!r.ok) throw new Error("清空失败");
+        if (id === sessionId) {
+          setMessages([]);
+          setCards([]);
+          setTodos([]);
+          setApprovals([]);
+          setError(null);
+        }
+        refreshSessions();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [sessionId, refreshSessions],
+  );
 
   /** 智能滚动：记录用户是否停留在底部 */
   const onChatScroll = useCallback(() => {
@@ -920,6 +997,9 @@ export function ChatPanel() {
                                     />
                                   )}
                                   <span className="session-item-title">
+                                    {s.pinned === 1 && (
+                                      <span className="session-pin-badge" title="已置顶">📌</span>
+                                    )}
                                     {s.title || "未命名会话"}
                                   </span>
                                   <span className="session-item-time">
@@ -927,6 +1007,50 @@ export function ChatPanel() {
                                   </span>
                                   {!selectMode && (
                                     <span className="session-item-actions">
+                                      <span
+                                        className="session-item-act"
+                                        role="button"
+                                        title={s.pinned === 1 ? "取消置顶" : "置顶会话"}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          togglePin(s.id);
+                                        }}
+                                      >
+                                        {s.pinned === 1 ? "🔓" : "📌"}
+                                      </span>
+                                      <span
+                                        className="session-item-act"
+                                        role="button"
+                                        title="导出 Markdown"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          exportSession(s.id, "md");
+                                        }}
+                                      >
+                                        ⬇
+                                      </span>
+                                      <span
+                                        className="session-item-act"
+                                        role="button"
+                                        title="导出 JSON"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          exportSession(s.id, "json");
+                                        }}
+                                      >
+                                        ⚙
+                                      </span>
+                                      <span
+                                        className="session-item-act"
+                                        role="button"
+                                        title="清空会话消息"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          clearSession(s.id);
+                                        }}
+                                      >
+                                        ∅
+                                      </span>
                                       <span
                                         className="session-item-act"
                                         role="button"
@@ -1035,7 +1159,8 @@ export function ChatPanel() {
                       <div className="md">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
-                          components={{ pre: CodeBlock }}
+                          rehypePlugins={[rehypeHighlight]}
+                          components={{ ...markdownComponents, pre: CodeBlock }}
                         >
                           {m.text}
                         </ReactMarkdown>

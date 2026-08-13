@@ -18,6 +18,8 @@ export interface SessionInfo {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** 置顶标记：1 置顶（排序优先），0 普通 */
+  pinned: number;
 }
 
 let db: DatabaseSync | undefined;
@@ -42,6 +44,11 @@ function getDb(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_session_messages
       ON session_messages(session_id, id);
   `);
+  // 旧库迁移：补 pinned 列（已存在则忽略）
+  const cols = d.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "pinned")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
+  }
   db = d;
   return d;
 }
@@ -52,6 +59,7 @@ function rowToSession(row: Record<string, unknown>): SessionInfo {
     title: String(row.title),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    pinned: Number(row.pinned ?? 0),
   };
 }
 
@@ -60,16 +68,16 @@ export function createSession(title = "新会话"): SessionInfo {
   const id = randomUUID();
   const now = Date.now();
   d.prepare(
-    "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    "INSERT INTO sessions (id, title, created_at, updated_at, pinned) VALUES (?, ?, ?, ?, 0)",
   ).run(id, title, now, now);
-  return { id, title, createdAt: now, updatedAt: now };
+  return { id, title, createdAt: now, updatedAt: now, pinned: 0 };
 }
 
-/** 按最近更新排序的会话列表 */
+/** 按最近更新排序的会话列表（置顶优先） */
 export function listSessions(): SessionInfo[] {
   const d = getDb();
   const rows = d
-    .prepare("SELECT * FROM sessions ORDER BY updated_at DESC")
+    .prepare("SELECT * FROM sessions ORDER BY pinned DESC, updated_at DESC")
     .all() as Record<string, unknown>[];
   return rows.map(rowToSession);
 }
@@ -89,6 +97,22 @@ export function renameSession(id: string, title: string): void {
     Date.now(),
     id,
   );
+}
+
+/** 置顶 / 取消置顶会话（不刷新更新时间，避免干扰"最近活跃"排序） */
+export function pinSession(id: string, pinned: boolean): void {
+  const d = getDb();
+  d.prepare("UPDATE sessions SET pinned = ? WHERE id = ?").run(
+    pinned ? 1 : 0,
+    id,
+  );
+}
+
+/** 清空会话消息（保留会话本身，标题不变） */
+export function clearSessionMessages(id: string): void {
+  const d = getDb();
+  d.prepare("DELETE FROM session_messages WHERE session_id = ?").run(id);
+  touchSession(id);
 }
 
 /** 会话最近更新时间的"会话"行为也触发 updated_at 刷新 */

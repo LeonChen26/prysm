@@ -618,6 +618,12 @@ body {
   color: #fff;
 }
 
+.session-pin-badge {
+  margin-right: 4px;
+  font-size: 12px;
+  vertical-align: -1px;
+}
+
 .session-rename-input {
   width: 100%;
   padding: 7px 10px;
@@ -1670,6 +1676,61 @@ body {
 .md img {
   max-width: 100%;
   border-radius: var(--radius);
+}
+
+.md-img-wrap {
+  display: block;
+  margin: 0.6em 0;
+}
+
+/* 代码高亮配色（rehype-highlight，适配浅/深主题） */
+.md .hljs-keyword,
+.md .hljs-selector-tag,
+.md .hljs-literal {
+  color: var(--brand);
+}
+
+.md .hljs-string,
+.md .hljs-attribute,
+.md .hljs-attr,
+.md .hljs-template-tag {
+  color: var(--success);
+}
+
+.md .hljs-title,
+.md .hljs-title.function_,
+.md .hljs-function .hljs-title {
+  color: var(--warning);
+}
+
+.md .hljs-number,
+.md .hljs-symbol,
+.md .hljs-variable {
+  color: #af52de;
+}
+
+.md .hljs-comment,
+.md .hljs-quote {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.md .hljs-built_in,
+.md .hljs-type,
+.md .hljs-class .hljs-title {
+  color: #e64d2e;
+}
+
+.md .hljs-meta {
+  color: var(--text-muted);
+}
+
+.md .hljs-emphasis {
+  font-style: italic;
+}
+
+.md .hljs-strong {
+  font-weight: 600;
 }
 
 /* ---------- 滚动条 ---------- */

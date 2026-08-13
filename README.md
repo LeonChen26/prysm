@@ -12,6 +12,8 @@
 - **并行工具执行**：单条消息含多个工具调用时并行执行，可切换为串行
 - **联网搜索**：bing（默认，国内可直连）/ duckduckgo
 - **待办清单**：任务拆解为步骤卡片，支持拖拽排序 / 删除 / 追加，实时展示进度与耗时
+- **会话管理**：重命名 / 置顶 / 批量删除 / 清空消息 / 导出为 Markdown 或 JSON
+- **代码高亮**：助手消息中的代码块语法高亮，支持一键复制
 
 ## 环境要求
 
@@ -96,10 +98,13 @@ pm2 start .next/standalone/server.js --name workbuddy-agent
 | 路径 | 说明 |
 | --- | --- |
 | `/` | 聊天主界面 |
-| `GET /api/sessions` | 会话列表 |
+| `GET /api/sessions` | 会话列表（置顶优先） |
 | `POST /api/sessions` | 创建会话 |
 | `GET /api/sessions/[id]` | 会话消息历史 |
+| `PATCH /api/sessions/[id]` | 重命名或置顶（`{ title }` / `{ pinned: bool }`） |
 | `DELETE /api/sessions/[id]` | 删除指定会话 |
+| `GET /api/sessions/[id]/export?format=md\|json` | 导出会话对话为 Markdown / JSON 文件 |
+| `POST /api/sessions/[id]/clear` | 清空会话消息（保留会话） |
 | `GET /api/agent?sessionId=xxx` | 返回指定会话的消息历史 |
 | `POST /api/agent` | 发送消息，SSE 流式返回 Agent 事件 |
 | `POST /api/agent/stop` | 停止当前会话的 Agent |
@@ -124,6 +129,7 @@ pm2 start .next/standalone/server.js --name workbuddy-agent
 | `MEMORY_RECALL_K` | `5` | 每次检索注入的历史 episode 条数 |
 | `TOOL_EXECUTION` | `parallel` | 并行 / 串行工具执行：`parallel` / `sequential` |
 | `WEB_SEARCH_PROVIDER` | `bing` | 搜索提供器：`bing` / `duckduckgo` |
+| `AGENT_ALLOWED_PATHS` | 空 | 额外允许 Agent 访问的根目录白名单（逗号分隔的绝对或相对路径），默认仅 `agent-workdir/` |
 | `PORT` | `3000` | standalone 产物监听端口 |
 | `HOSTNAME` | - | standalone 产物绑定地址（如 `0.0.0.0`） |
 

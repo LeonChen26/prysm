@@ -8,10 +8,95 @@ import { fetchUrlAsText, webSearch } from "./web";
 /** 所有文件工具的作用域：项目下的 agent-workdir 目录 */
 export const AGENT_WORKDIR = path.resolve(process.cwd(), "agent-workdir");
 
+/** 额外可访问的根目录白名单（AGENT_ALLOWED_PATHS，逗号分隔的绝对或相对路径） */
+export const ALLOWED_ROOTS = (process.env.AGENT_ALLOWED_PATHS ?? "")
+  .split(",")
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .map((p) => path.resolve(p));
+
+interface FileHit {
+  path: string;
+  line: number;
+  text: string;
+}
+
+/** 文件名通配（支持 * 和 ?）转正则 */
+function globToRegex(pattern: string): RegExp | null {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  try {
+    return new RegExp(`^${escaped}$`, "i");
+  } catch {
+    return null;
+  }
+}
+
+/** 在工作区内递归搜索关键词（限制单文件大小，跳过常见无关目录） */
+async function searchInWorkdir(
+  query: string,
+  pattern: string | undefined,
+  limit: number,
+): Promise<FileHit[]> {
+  const hits: FileHit[] = [];
+  const re = pattern ? globToRegex(pattern) : null;
+  const MAX_FILE_BYTES = 1024 * 1024; // 跳过 1MB 以上大文件
+  const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build"]);
+
+  const walk = async (dir: string) => {
+    if (hits.length >= limit) return;
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (hits.length >= limit) return;
+      if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name)) continue;
+        await walk(path.join(dir, e.name));
+      } else if (e.isFile()) {
+        if (re && !re.test(e.name)) continue;
+        const full = path.join(dir, e.name);
+        try {
+          const stat = await fs.stat(full);
+          if (stat.size > MAX_FILE_BYTES) continue;
+          const text = await fs.readFile(full, "utf-8");
+          const lines = text.split("\n");
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(query)) {
+              hits.push({
+                path: path.relative(AGENT_WORKDIR, full).replace(/\\/g, "/"),
+                line: i + 1,
+                text: lines[i].slice(0, 200),
+              });
+              if (hits.length >= limit) return;
+            }
+          }
+        } catch {
+          /* 二进制或读取失败则跳过 */
+        }
+      }
+    }
+  };
+
+  await walk(AGENT_WORKDIR);
+  return hits;
+}
+
 function resolveInWorkdir(relative: string): string {
   const resolved = path.resolve(AGENT_WORKDIR, relative);
   if (resolved !== AGENT_WORKDIR && !resolved.startsWith(AGENT_WORKDIR + path.sep)) {
-    throw new Error(`路径越界: "${relative}" 不在 agent-workdir 内`);
+    // 不在工作区内：检查是否落在白名单根目录下
+    const insideAllowed = ALLOWED_ROOTS.some(
+      (root) => resolved === root || resolved.startsWith(root + path.sep),
+    );
+    if (!insideAllowed) {
+      throw new Error(`路径越界: "${relative}" 不在 agent-workdir 内`);
+    }
   }
   return resolved;
 }
@@ -31,6 +116,7 @@ interface ToolArgs {
   items: { title: string; detail?: string }[];
   expect?: string;
   limit?: number;
+  pattern?: string;
   updates?: TodoUpdate[];
   append?: { title: string; detail?: string }[];
 }
@@ -394,6 +480,52 @@ export const tools: AgentTool<any>[] = [
           { type: "text", text: `标题: ${page.title}\n${page.truncated ? "(内容过长已截断)\n" : ""}${body}` },
         ],
         details: { url: page.url, title: page.title, truncated: page.truncated },
+      };
+    },
+  },
+  {
+    name: "search_files",
+    label: "搜索文件内容",
+    description:
+      "在工作区（agent-workdir）内递归搜索包含指定关键词的文件，返回文件名、行号与命中行。可选 pattern 过滤文件名（支持 * 通配，如 '*.md'）。用于定位代码、笔记或配置中的相关内容。",
+    parameters: Type.Object({
+      query: Type.String({ description: "要搜索的内容关键词" }),
+      pattern: Type.Optional(
+        Type.String({ description: "文件名过滤通配符，如 *.md / *.ts（可选）" }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: 50,
+          description: "最大返回命中条数，默认 20",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
+      const hits = await searchInWorkdir(params.query, params.pattern, params.limit ?? 20);
+      if (hits.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `在工作区中未找到包含 "${params.query}" 的文件${params.pattern ? `（文件名匹配 ${params.pattern}）` : ""}`,
+            },
+          ],
+          details: { query: params.query, hits: [] },
+        };
+      }
+      const text = hits
+        .map((h) => `${h.path}:${h.line}: ${h.text.trim()}`)
+        .join("\n");
+      return {
+        content: [
+          {
+            type: "text",
+            text: `找到 ${hits.length} 处匹配（${hits.length >= (params.limit ?? 20) ? "已达上限 " : ""}）：\n${text}`,
+          },
+        ],
+        details: { query: params.query, count: hits.length, hits },
       };
     },
   },

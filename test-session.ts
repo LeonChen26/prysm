@@ -5,11 +5,13 @@
  */
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
+  clearSessionMessages,
   createSession,
   deleteSession,
   getSession,
   getSessionMessages,
   listSessions,
+  pinSession,
   renameSession,
   saveSessionMessages,
 } from "./lib/session";
@@ -66,6 +68,25 @@ async function main() {
   const list2 = listSessions();
   if (list2[0].id !== a.id) fail("最近更新的会话应排最前");
   console.log(`  ✓ 重命名生效，A 排最前`);
+
+  console.log("== 置顶 ==");
+  pinSession(b.id, true);
+  const pinnedA = getSession(a.id);
+  const pinnedB = getSession(b.id);
+  if (pinnedA?.pinned !== 0 || pinnedB?.pinned !== 1) fail("置顶标记未生效");
+  const listPin = listSessions();
+  if (listPin[0].id !== b.id) fail("置顶会话应排最前");
+  pinSession(b.id, false);
+  if (getSession(b.id)?.pinned !== 0) fail("取消置顶未生效");
+  const listUnpin = listSessions();
+  if (listUnpin[0].id !== a.id) fail("取消置顶后按更新时间排序");
+  console.log("  ✓ 置顶/取消置顶生效，排序正确");
+
+  console.log("== 清空消息 ==");
+  clearSessionMessages(a.id);
+  if (getSessionMessages(a.id).length !== 0) fail("清空后消息应为空");
+  if (!getSession(a.id)) fail("清空不应删除会话本身");
+  console.log("  ✓ 清空消息保留会话");
 
   console.log("== 删除 ==");
   deleteSession(b.id);
