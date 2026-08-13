@@ -142,6 +142,11 @@ export function ChatPanel() {
   const [msgSelected, setMsgSelected] = useState<Set<number>>(new Set());
   /** 消息编辑：正在编辑的用户消息索引（-1 表示非编辑态） */
   const [editingIndex, setEditingIndex] = useState(-1);
+  /** 侧栏宽度（可拖拽调宽，持久化到 localStorage） */
+  const [leftW, setLeftW] = useState(220);
+  const [rightW, setRightW] = useState(300);
+  const leftWRef = useRef(220);
+  const rightWRef = useRef(300);
   /** todo 拖拽：记录被拖动的项 id */
   const todoDragRef = useRef<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -191,6 +196,61 @@ export function ChatPanel() {
     } catch {
       /* 忽略 */
     }
+  }, []);
+
+  // 读取持久化的侧栏宽度（本地保存，不跟随他人 clone 的默认值）
+  useEffect(() => {
+    try {
+      const l = Number(localStorage.getItem("prysm-sidebar-left"));
+      const r = Number(localStorage.getItem("prysm-sidebar-right"));
+      if (Number.isFinite(l) && l >= 160 && l <= 380) {
+        leftWRef.current = l;
+        setLeftW(l);
+      }
+      if (Number.isFinite(r) && r >= 240 && r <= 520) {
+        rightWRef.current = r;
+        setRightW(r);
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }, []);
+
+  /** 侧栏拖拽调宽：左栏拖动向右增宽，右栏拖动向左增宽（宽度范围持久化） */
+  const startResize = useCallback((which: "left" | "right") => (e: ReactMouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = which === "left" ? leftWRef.current : rightWRef.current;
+    const min = which === "left" ? 160 : 240;
+    const max = which === "left" ? 380 : 520;
+    document.body.classList.add("resizing");
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      const w = Math.min(
+        Math.max(which === "left" ? startW + delta : startW - delta, min),
+        max,
+      );
+      if (which === "left") {
+        leftWRef.current = w;
+        setLeftW(w);
+      } else {
+        rightWRef.current = w;
+        setRightW(w);
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.classList.remove("resizing");
+      try {
+        localStorage.setItem("prysm-sidebar-left", String(leftWRef.current));
+        localStorage.setItem("prysm-sidebar-right", String(rightWRef.current));
+      } catch {
+        /* 隐私模式忽略 */
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }, []);
 
   /** 切换通知开关（首次开启时请求浏览器授权） */
@@ -1394,7 +1454,15 @@ export function ChatPanel() {
         </button>
       </header>
 
-      <main className="app-main">
+      <main
+        className="app-main"
+        style={
+          {
+            "--left-w": `${leftW}px`,
+            "--right-w": `${rightW}px`,
+          } as React.CSSProperties
+        }
+      >
         <aside className="session-panel">
           <div className="session-head">
             <span className="session-title">
@@ -1655,6 +1723,11 @@ export function ChatPanel() {
           </div>
         </aside>
 
+        <div
+          className="drag-handle drag-left"
+          onMouseDown={startResize("left")}
+          aria-hidden="true"
+        />
         <section className="chat">
           <div
             className="chat-scroll"
@@ -2010,6 +2083,11 @@ export function ChatPanel() {
           </form>
         </section>
 
+        <div
+          className="drag-handle drag-right"
+          onMouseDown={startResize("right")}
+          aria-hidden="true"
+        />
         <aside className="panel">
           <div className="panel-title">
             <h2>任务记录</h2>

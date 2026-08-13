@@ -119,7 +119,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  max-width: 1080px;
+  /* 宽度自适应：大屏时整体加宽，超宽屏仍限宽居中保证可读性 */
+  max-width: 1440px;
   margin: 0 auto;
   padding: 0 20px;
 }
@@ -291,17 +292,67 @@ body {
 .app-main {
   flex: 1;
   display: grid;
-  grid-template-columns: 220px 1fr 300px;
+  /* 侧栏宽度由拖拽手柄调节（CSS 变量，ChatPanel 内联设置） */
+  grid-template-columns: var(--left-w, 220px) 1fr var(--right-w, 300px);
   gap: 16px;
   min-height: 0;
   padding: 20px 0;
+  position: relative;
+}
+
+/* 侧栏拖拽手柄：悬停显示品牌色细条，拖拽中全屏 col-resize */
+.drag-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.drag-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+  height: 36px;
+  border-radius: 3px;
+  background: transparent;
+  transition: background 0.15s ease, height 0.15s ease;
+}
+
+.drag-handle:hover::after,
+body.resizing .drag-handle::after {
+  background: var(--brand);
+  height: 64px;
+}
+
+.drag-left {
+  left: var(--left-w, 220px);
+  margin-left: -9px;
+}
+
+.drag-right {
+  right: var(--right-w, 300px);
+  margin-right: -9px;
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 @media (max-width: 900px) {
   .app-main {
-    grid-template-columns: 1fr 300px;
+    grid-template-columns: 1fr var(--right-w, 300px);
   }
   .session-panel {
+    display: none;
+  }
+  .drag-left {
     display: none;
   }
 }
@@ -313,6 +364,9 @@ body {
   .panel {
     order: -1;
     max-height: 180px;
+  }
+  .drag-handle {
+    display: none;
   }
 }
 
@@ -920,9 +974,11 @@ body {
   font-size: 14px;
 }
 
-/* iMessage 气泡：用户蓝色（右），Agent 系统灰（左），尾巴在发送侧 */
+/* iMessage 气泡：用户蓝色（右），Agent 系统灰（左），尾巴在发送侧；宽度随内容自适应，长内容仍有上限 */
 .message-user .message-body {
-  max-width: 76%;
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 85%;
   padding-top: 0;
   background: var(--user-bubble);
   color: #fff;
@@ -932,7 +988,9 @@ body {
 }
 
 .message-assistant .message-body {
-  max-width: 76%;
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 92%;
   padding-top: 0;
   background: var(--surface-filled);
   color: var(--text);
