@@ -2,7 +2,7 @@
  * 审批规则化（policy）验证脚本 —— 纯函数断言，无需 LLM。
  * 运行：npx tsx test-policy.ts
  */
-import { isAutoApproved } from "./lib/policy";
+import { isAutoApproved } from "../../lib/policy";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);

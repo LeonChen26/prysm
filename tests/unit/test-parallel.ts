@@ -13,8 +13,8 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { SYSTEM_PROMPT, mapEvent } from "./lib/agent";
-import { tools } from "./lib/tools";
+import { SYSTEM_PROMPT, mapEvent } from "../../lib/agent";
+import { tools } from "../../lib/tools";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);

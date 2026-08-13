@@ -2,7 +2,7 @@
  * 联网搜索能力验证（真实网络）
  * 运行: npx tsx test-web.ts
  */
-import { fetchUrlAsText, webSearch } from "./lib/web";
+import { fetchUrlAsText, webSearch } from "../../lib/web";
 
 async function main() {
   console.log("== web_search（Bing）==");

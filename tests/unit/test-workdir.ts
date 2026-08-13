@@ -15,8 +15,8 @@ import {
   listWorkdir,
   readWorkdirFile,
   writeWorkdirFile,
-} from "./lib/workdir";
-import { AGENT_WORKDIR } from "./lib/paths";
+} from "../../lib/workdir";
+import { AGENT_WORKDIR } from "../../lib/paths";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);

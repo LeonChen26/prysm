@@ -12,8 +12,8 @@ import {
   fauxProvider,
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import { mapEvent, SYSTEM_PROMPT } from "./lib/agent";
-import { tools, AGENT_WORKDIR } from "./lib/tools";
+import { mapEvent, SYSTEM_PROMPT } from "../../lib/agent";
+import { tools, AGENT_WORKDIR } from "../../lib/tools";
 import fs from "node:fs/promises";
 import path from "node:path";
 

@@ -4,7 +4,7 @@
  *       验证会话隔离（B 看不到 A 内容）→ 切回 A 恢复上下文继续追问。
  * 运行前需启动 dev server；运行：npx tsx test-session-e2e.ts
  */
-import { AGENT_WORKDIR } from "./lib/tools";
+import { AGENT_WORKDIR } from "../../lib/tools";
 import fs from "node:fs/promises";
 import path from "node:path";
 

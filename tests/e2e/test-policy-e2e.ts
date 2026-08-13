@@ -4,7 +4,7 @@
  * 运行前需启动 dev server（.env.local 含 APPROVAL_ALLOW_PATHS=notes/,*.md）。
  * 运行：npx tsx test-policy-e2e.ts
  */
-import { AGENT_WORKDIR } from "./lib/tools";
+import { AGENT_WORKDIR } from "../../lib/tools";
 import fs from "node:fs/promises";
 import path from "node:path";
 

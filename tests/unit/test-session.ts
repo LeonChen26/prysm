@@ -14,7 +14,7 @@ import {
   pinSession,
   renameSession,
   saveSessionMessages,
-} from "./lib/session";
+} from "../../lib/session";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);

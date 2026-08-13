@@ -4,7 +4,7 @@
  *       期望收到 stopped 事件 → 再发一条消息验证 agent 后续可用。
  * 运行前需启动 dev server；运行：npx tsx test-stop-e2e.ts
  */
-import { AGENT_WORKDIR } from "./lib/tools";
+import { AGENT_WORKDIR } from "../../lib/tools";
 import fs from "node:fs/promises";
 import path from "node:path";
 

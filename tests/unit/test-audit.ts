@@ -5,8 +5,8 @@
  * 2. 历史查询（新在前）与清空
  */
 
-import { requestApproval, resolveApproval } from "./lib/approval";
-import { clearApprovals, countApprovals, listApprovals } from "./lib/audit";
+import { requestApproval, resolveApproval } from "../../lib/approval";
+import { clearApprovals, countApprovals, listApprovals } from "../../lib/audit";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);

@@ -1,7 +1,7 @@
 /**
  * Markdown → 纯文本单测（离线）
  */
-import { mdToPlainText } from "./lib/plaintext";
+import { mdToPlainText } from "../../lib/plaintext";
 
 let assertCount = 0;
 let failCount = 0;

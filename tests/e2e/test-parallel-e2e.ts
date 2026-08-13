@@ -3,7 +3,7 @@
  * 任务：读取目录下多个文件，观察 agent 是否一次发起多个 read_file。
  * 运行前需启动 dev server；运行：npx tsx test-parallel-e2e.ts
  */
-import { AGENT_WORKDIR } from "./lib/tools";
+import { AGENT_WORKDIR } from "../../lib/tools";
 import fs from "node:fs/promises";
 import path from "node:path";
 

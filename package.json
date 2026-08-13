@@ -9,9 +9,9 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit",
-    "test:unit": "tsx test-todo.ts && tsx test-policy.ts && tsx test-fileops.ts && tsx test-verify.ts && tsx test-session.ts && tsx test-parallel.ts && tsx test-context.ts && tsx test-approval.ts && tsx test-audit.ts && tsx test-workdir.ts && tsx test-stats.ts && tsx test-plaintext.ts",
-    "test:web": "tsx test-web.ts",
-    "test:e2e": "tsx test-todo-e2e.ts && tsx test-fileops-e2e.ts && tsx test-policy-e2e.ts && tsx test-session-e2e.ts && tsx test-stop-e2e.ts && tsx test-verify-e2e.ts && tsx test-parallel-e2e.ts"
+    "test:unit": "tsx tests/unit/test-todo.ts && tsx tests/unit/test-policy.ts && tsx tests/unit/test-fileops.ts && tsx tests/unit/test-verify.ts && tsx tests/unit/test-session.ts && tsx tests/unit/test-parallel.ts && tsx tests/unit/test-context.ts && tsx tests/unit/test-approval.ts && tsx tests/unit/test-audit.ts && tsx tests/unit/test-workdir.ts && tsx tests/unit/test-stats.ts && tsx tests/unit/test-plaintext.ts",
+    "test:web": "tsx tests/web/test-web.ts",
+    "test:e2e": "tsx tests/e2e/test-todo-e2e.ts && tsx tests/e2e/test-fileops-e2e.ts && tsx tests/e2e/test-policy-e2e.ts && tsx tests/e2e/test-session-e2e.ts && tsx tests/e2e/test-stop-e2e.ts && tsx tests/e2e/test-verify-e2e.ts && tsx tests/e2e/test-parallel-e2e.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "latest",

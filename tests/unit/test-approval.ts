@@ -7,7 +7,7 @@ import {
   requestApproval,
   resolveApproval,
   subscribeApprovals,
-} from "./lib/approval";
+} from "../../lib/approval";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);

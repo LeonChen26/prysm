@@ -14,9 +14,9 @@ import {
   fauxProvider,
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import { mapEvent, SYSTEM_PROMPT } from "./lib/agent";
-import { tools } from "./lib/tools";
-import type { UiEvent } from "./lib/agent";
+import { mapEvent, SYSTEM_PROMPT } from "../../lib/agent";
+import { tools } from "../../lib/tools";
+import type { UiEvent } from "../../lib/agent";
 
 interface TodoItem {
   id: string;

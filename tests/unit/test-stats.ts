@@ -2,8 +2,8 @@
  * 运行统计聚合单测（离线）
  * 直接构造运行日志调用 computeStats，验证聚合正确性。
  */
-import { computeStats } from "./lib/stats";
-import type { RunLogEntry } from "./lib/agent";
+import { computeStats } from "../../lib/stats";
+import type { RunLogEntry } from "../../lib/agent";
 
 let assertCount = 0;
 let failCount = 0;

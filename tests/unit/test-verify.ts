@@ -3,7 +3,7 @@
  * 覆盖：存在/无 expect、expect 命中、expect 未命中、文件不存在、越界拦截。
  * 运行：npx tsx test-verify.ts
  */
-import { tools, AGENT_WORKDIR } from "./lib/tools";
+import { tools, AGENT_WORKDIR } from "../../lib/tools";
 import fs from "node:fs/promises";
 import path from "node:path";
 
