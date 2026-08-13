@@ -108,6 +108,46 @@ const TODO_STATUS_LABELS: Record<TodoItem["status"], string> = {
   cancelled: "已取消",
 };
 
+/** 会话相对时间：刚刚 / x分钟前 / x小时前 / x天前 / 日期 */
+function formatRelTime(ts: number): string {
+  if (!ts) return "";
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`;
+  if (diff < 7 * 86400_000) return `${Math.floor(diff / 86400_000)} 天前`;
+  const d = new Date(ts);
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/** Markdown 代码块：hover 显示复制按钮 */
+function CodeBlock({ children }: { children?: React.ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (!ref.current) return;
+    try {
+      await navigator.clipboard.writeText(ref.current.textContent ?? "");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* 剪贴板不可用时静默 */
+    }
+  };
+  return (
+    <div className="code-block">
+      <button
+        type="button"
+        className={`code-copy ${copied ? "code-copied" : ""}`}
+        onClick={copy}
+      >
+        {copied ? "已复制" : "复制"}
+      </button>
+      <pre ref={ref}>{children}</pre>
+    </div>
+  );
+}
+
 export function ChatPanel() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -442,6 +482,9 @@ export function ChatPanel() {
                       <span className="session-item-title">
                         {s.title || "未命名会话"}
                       </span>
+                      <span className="session-item-time">
+                        {formatRelTime(s.updatedAt)}
+                      </span>
                       <span
                         className="session-item-del"
                         role="button"
@@ -486,28 +529,46 @@ export function ChatPanel() {
                 </p>
               </div>
             )}
-            {messages.map((m, i) => (
-              <div key={i} className={`message message-${m.role}`}>
-                <div className="message-role">
-                  {m.role === "user" ? (
-                    <span aria-hidden="true">●</span>
-                  ) : (
-                    <span aria-hidden="true">✦</span>
-                  )}
+            {messages.map((m, i) => {
+              const prev = messages[i - 1];
+              const next = messages[i + 1];
+              // iMessage 气泡分组：连续同角色消息合并，仅组尾显示尾巴与头像
+              const groupEnd = !next || next.role !== m.role;
+              const groupMid = !!prev && prev.role === m.role && !!next && next.role === m.role;
+              const cls = [
+                "message",
+                `message-${m.role}`,
+                groupEnd ? "group-end" : "",
+                groupMid ? "group-mid" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return (
+                <div key={i} className={cls}>
+                  <div className="message-role" aria-hidden={!groupEnd}>
+                    {m.role === "user" ? (
+                      <span aria-hidden="true">●</span>
+                    ) : (
+                      <span aria-hidden="true">✦</span>
+                    )}
+                  </div>
+                  <div className="message-body">
+                    {m.text ? (
+                      <div className="md">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{ pre: CodeBlock }}
+                        >
+                          {m.text}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <span className="cursor-blink" />
+                    )}
+                  </div>
                 </div>
-                <div className="message-body">
-                  {m.text ? (
-                    <div className="md">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {m.text}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    <span className="cursor-blink" />
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {error && <div className="error-banner">{error}</div>}
             <div ref={scrollRef} />
           </div>
@@ -519,11 +580,23 @@ export function ChatPanel() {
               send();
             }}
           >
-            <input
+            <textarea
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="描述你要完成的任务…"
+              onChange={(e) => {
+                setInput(e.target.value);
+                // 自动增高（上限 6 行）
+                e.target.style.height = "auto";
+                e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              placeholder="描述你要完成的任务…（Enter 发送，Shift+Enter 换行）"
               disabled={busy}
+              rows={1}
             />
             {busy ? (
               <button type="button" className="btn-stop" onClick={stop}>

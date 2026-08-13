@@ -397,6 +397,12 @@ body {
   white-space: nowrap;
 }
 
+.session-item-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .session-item-del {
   flex-shrink: 0;
   width: 18px;
@@ -437,7 +443,6 @@ body {
   padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
 .empty {
@@ -495,6 +500,23 @@ body {
 
 .message-user {
   flex-direction: row-reverse;
+}
+
+/* iMessage 气泡分组：组间 16px，组内 2px；组中间消息隐藏头像、圆角全大 */
+.message + .message {
+  margin-top: 16px;
+}
+
+.message.group-mid {
+  margin-top: 2px;
+}
+
+.message.group-mid .message-role {
+  visibility: hidden;
+}
+
+.message.group-mid .message-body {
+  border-radius: 18px;
 }
 
 .message-role {
@@ -601,11 +623,12 @@ body {
   border-top: 1px solid var(--border);
 }
 
-.input-bar input {
+.input-bar input,
+.input-bar textarea {
   flex: 1;
   padding: 12px 18px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: 14px;
   background: var(--surface-muted);
   color: var(--text);
   font-size: 14px;
@@ -613,13 +636,22 @@ body {
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
-.input-bar input:focus {
+.input-bar textarea {
+  resize: none;
+  line-height: 1.5;
+  max-height: 140px;
+  font-family: inherit;
+}
+
+.input-bar input:focus,
+.input-bar textarea:focus {
   border-color: var(--brand);
   background: var(--surface);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent);
 }
 
-.input-bar input:disabled {
+.input-bar input:disabled,
+.input-bar textarea:disabled {
   opacity: 0.6;
 }
 
@@ -1055,6 +1087,41 @@ body {
   color: #f2f2f7;
   overflow-x: auto;
   line-height: 1.6;
+}
+
+/* 代码块复制按钮（hover 显示） */
+.code-block {
+  position: relative;
+}
+
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 9px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.code-block:hover .code-copy {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.code-copied {
+  background: rgba(52, 199, 89, 0.85) !important;
+  color: #fff !important;
+  opacity: 1;
 }
 
 .md pre code {
