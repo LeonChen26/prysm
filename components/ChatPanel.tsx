@@ -27,8 +27,16 @@ interface ApprovalCard {
   args: unknown;
 }
 
+interface SessionInfo {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface SseEvent {
   type:
+    | "session"
     | "turn_start"
     | "delta"
     | "tool_start"
@@ -44,6 +52,8 @@ interface SseEvent {
   args?: unknown;
   isError?: boolean;
   todos?: TodoItem[];
+  sessionId?: string;
+  title?: string;
   message?: string;
 }
 
@@ -80,6 +90,7 @@ const TOOL_LABELS: Record<string, string> = {
   move_file: "移动/重命名",
   copy_file: "复制文件",
   delete_file: "删除文件",
+  verify_file: "校验文件",
   todo_create: "创建任务计划",
   todo_modify: "更新任务计划",
   todo_list: "查看任务计划",
@@ -93,6 +104,8 @@ const TODO_STATUS_LABELS: Record<TodoItem["status"], string> = {
 };
 
 export function ChatPanel() {
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [cards, setCards] = useState<ToolCard[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -102,15 +115,91 @@ export function ChatPanel() {
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 挂载时拉取会话历史
+  // 加载会话列表，并选中最近的会话
   useEffect(() => {
-    fetch("/api/agent")
+    fetch("/api/sessions")
       .then((r) => r.json())
-      .then((data) => {
-        if (data?.messages) setMessages(data.messages);
+      .then(async (data) => {
+        const list = (data?.sessions ?? []) as SessionInfo[];
+        setSessions(list);
+        if (list.length > 0) {
+          setSessionId(list[0].id);
+          const res = await fetch(`/api/sessions/${list[0].id}`);
+          const detail = await res.json();
+          if (detail?.messages) setMessages(detail.messages);
+        }
       })
       .catch(() => {});
   }, []);
+
+  /** 切换到指定会话 */
+  const switchSession = useCallback(
+    async (id: string) => {
+      if (busy) return;
+      setSessionId(id);
+      setCards([]);
+      setTodos([]);
+      setApprovals([]);
+      setError(null);
+      setMessages([]);
+      try {
+        const res = await fetch(`/api/sessions/${id}`);
+        const data = await res.json();
+        if (data?.messages) setMessages(data.messages);
+        else if (data?.error) setError(data.error);
+      } catch {
+        setError("加载会话失败");
+      }
+    },
+    [busy],
+  );
+
+  /** 新建会话 */
+  const newSession = useCallback(async () => {
+    if (busy) return;
+    try {
+      const res = await fetch("/api/sessions", { method: "POST" });
+      const data = await res.json();
+      const s = data?.session as SessionInfo | undefined;
+      if (s) {
+        setSessions((list) => [s, ...list]);
+        setSessionId(s.id);
+        setMessages([]);
+        setCards([]);
+        setTodos([]);
+        setApprovals([]);
+        setError(null);
+      }
+    } catch {
+      setError("新建会话失败");
+    }
+  }, [busy]);
+
+  /** 删除会话 */
+  const removeSession = useCallback(
+    async (id: string) => {
+      try {
+        await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+        const rest = sessions.filter((s) => s.id !== id);
+        setSessions(rest);
+        if (id === sessionId) {
+          setCards([]);
+          setTodos([]);
+          setApprovals([]);
+          setError(null);
+          if (rest.length > 0) {
+            switchSession(rest[0].id);
+          } else {
+            setSessionId(null);
+            setMessages([]);
+          }
+        }
+      } catch {
+        setError("删除会话失败");
+      }
+    },
+    [sessions, sessionId, switchSession],
+  );
 
   // 消息 / 卡片变化时自动滚动到底部
   useEffect(() => {
@@ -130,7 +219,7 @@ export function ChatPanel() {
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, sessionId }),
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => null);
@@ -138,6 +227,18 @@ export function ChatPanel() {
       }
       await readSSE(res, (ev) => {
         switch (ev.type) {
+          case "session":
+            // 服务端确认/分配的会话（未指定时取最新或新建）
+            if (ev.sessionId) {
+              setSessionId(ev.sessionId);
+              setSessions((list) => {
+                const exists = list.some((s) => s.id === ev.sessionId);
+                return exists
+                  ? list
+                  : [{ id: ev.sessionId!, title: ev.title ?? "新会话", createdAt: 0, updatedAt: 0 }, ...list];
+              });
+            }
+            break;
           case "delta":
             setMessages((m) => {
               const copy = [...m];
@@ -188,7 +289,7 @@ export function ChatPanel() {
     } finally {
       setBusy(false);
     }
-  }, [input, busy]);
+  }, [input, busy, sessionId]);
 
   const decideApproval = useCallback(async (id: string, approve: boolean) => {
     setApprovals((a) => a.filter((item) => item.id !== id));
@@ -221,6 +322,51 @@ export function ChatPanel() {
       </header>
 
       <main className="app-main">
+        <aside className="session-panel">
+          <div className="session-head">
+            <span className="session-title">会话</span>
+            <button
+              className="session-new"
+              onClick={newSession}
+              disabled={busy}
+              title="新建会话"
+            >
+              ＋
+            </button>
+          </div>
+          <div className="session-scroll">
+            {sessions.length === 0 ? (
+              <p className="session-empty">还没有会话</p>
+            ) : (
+              <ul className="session-list">
+                {sessions.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      className={`session-item ${s.id === sessionId ? "session-active" : ""}`}
+                      onClick={() => switchSession(s.id)}
+                    >
+                      <span className="session-item-title">
+                        {s.title || "未命名会话"}
+                      </span>
+                      <span
+                        className="session-item-del"
+                        role="button"
+                        title="删除会话"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeSession(s.id);
+                        }}
+                      >
+                        ×
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </aside>
+
         <section className="chat">
           <div className="chat-scroll">
             {messages.length === 0 && (

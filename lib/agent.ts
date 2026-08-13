@@ -4,6 +4,7 @@ import { requestApproval } from "./approval";
 import { messageText, transformContext } from "./context";
 import { MEMORY_RECALL_K, resetMemoryTracking, retrieveEpisodes } from "./memory";
 import { isAutoApproved } from "./policy";
+import { getSessionMessages } from "./session";
 import { tools } from "./tools";
 
 const PROVIDER_FACTORIES = {
@@ -30,11 +31,12 @@ export const SYSTEM_PROMPT = `你是 WorkBuddy Agent —— 一个能自主完�
 1. 理解用户意图后，先规划步骤，再调用工具逐步完成。
 2. 对需要多个步骤的复杂任务，先用 todo_create 将任务拆解为清晰的步骤清单；开始执行某一步前用 todo_modify 把它标记为 in_progress，每完成一步标记为 completed；中途如需调整清单，用 todo_modify 追加或修改，不要重复调用 todo_create 覆盖整个清单。
 3. 工具调用失败时，分析错误原因，尝试换个参数或换一种方式重试。
-4. 任务完成后，用简洁的中文总结做了什么、结果如何，并确认所有步骤已完成。
+4. 任务完成后，用 verify_file 自检关键交付物（确认文件存在、内容符合预期），校验失败时分析原因并修正后重新校验，再向用户总结做了什么、结果如何。
 5. 用户意图不明确时，先向用户确认，不要擅自猜测。`;
 
 let models: ReturnType<typeof createModels> | undefined;
-let agent: Agent | undefined;
+/** 按会话缓存 Agent 实例：切换会话即切换实例，历史消息在构造时恢复 */
+const agentPool = new Map<string, Agent>();
 
 async function ensureModels(): Promise<ReturnType<typeof createModels>> {
   if (models) return models;
@@ -122,8 +124,11 @@ async function buildContext(
   return base;
 }
 
-export async function getAgent(): Promise<Agent> {
-  if (agent) return agent;
+/** 获取指定会话的 Agent（不存在则用历史消息新建，实现会话恢复） */
+export async function getAgent(sessionId: string): Promise<Agent> {
+  const existing = agentPool.get(sessionId);
+  if (existing) return existing;
+
   const m = await ensureModels();
   const model = m.getModel(DEFAULT_PROVIDER, DEFAULT_MODEL);
   if (!model) {
@@ -137,11 +142,13 @@ export async function getAgent(): Promise<Agent> {
       `未检测到 ${DEFAULT_PROVIDER} 的 API Key。请在项目根目录的 .env.local 中配置 ${KEY_ENV[DEFAULT_PROVIDER]}=sk-xxx（可参考 .env.example），配置后重启 dev server 生效。`,
     );
   }
-  agent = new Agent({
+  const messages = getSessionMessages(sessionId);
+  const a = new Agent({
     initialState: {
       systemPrompt: SYSTEM_PROMPT,
       model,
       tools,
+      messages,
     },
     streamFn: m.streamSimple.bind(m),
     // 阶段 2+4：上下文压缩 + 情景记忆检索注入
@@ -161,13 +168,14 @@ export async function getAgent(): Promise<Agent> {
       return undefined;
     },
   });
-  return agent;
+  agentPool.set(sessionId, a);
+  return a;
 }
 
 /** 仅用于 dev 热重载时的状态重置 */
 export function resetAgent(): void {
-  agent?.reset();
-  agent = undefined;
+  for (const a of agentPool.values()) a.reset();
+  agentPool.clear();
   models = undefined;
   resetMemoryTracking();
 }

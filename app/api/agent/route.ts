@@ -2,7 +2,15 @@ import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { getAgent, mapEvent } from "@/lib/agent";
 import { subscribeApprovals } from "@/lib/approval";
-import { rememberNewMessages } from "@/lib/memory";
+import { rememberMessages } from "@/lib/memory";
+import {
+  createSession,
+  getSession,
+  listSessions,
+  renameSession,
+  saveSessionMessages,
+  type SessionInfo,
+} from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,14 +25,34 @@ function toUiMessage(m: AgentMessage) {
   return null;
 }
 
-/** GET /api/agent —— 返回当前会话的消息历史 */
-export async function GET() {
+/** 解析请求中的会话：显式指定且存在则用之，否则取最新会话，无则新建 */
+function resolveSession(body: { sessionId?: unknown }): SessionInfo {
+  if (typeof body.sessionId === "string" && body.sessionId) {
+    const s = getSession(body.sessionId);
+    if (s) return s;
+  }
+  return listSessions()[0] ?? createSession();
+}
+
+/** GET /api/agent?sessionId=xxx —— 返回指定会话（默认最新）的消息历史 */
+export async function GET(req: Request) {
   try {
-    const agent = await getAgent();
+    const url = new URL(req.url);
+    const sessionId = url.searchParams.get("sessionId") ?? undefined;
+    let session: SessionInfo | undefined = sessionId
+      ? getSession(sessionId)
+      : undefined;
+    if (!session) session = listSessions()[0];
+    if (!session) return Response.json({ messages: [], session: null });
+
+    const agent = await getAgent(session.id);
     const messages = agent.state.messages
       .map(toUiMessage)
       .filter((m): m is NonNullable<typeof m> => m !== null);
-    return Response.json({ messages });
+    return Response.json({
+      messages,
+      session: { id: session.id, title: session.title },
+    });
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : String(err) },
@@ -35,20 +63,21 @@ export async function GET() {
 
 /** POST /api/agent —— 发送消息，返回 SSE 事件流 */
 export async function POST(req: Request) {
-  let message: string;
+  let body: { message?: unknown; sessionId?: unknown };
   try {
-    const body = await req.json();
-    message = String(body?.message ?? "").trim();
+    body = await req.json();
   } catch {
     return Response.json({ error: "请求体必须是 JSON: { message: string }" }, { status: 400 });
   }
+  const message = String(body?.message ?? "").trim();
   if (!message) {
     return Response.json({ error: "message 不能为空" }, { status: 400 });
   }
+  const session = resolveSession(body);
 
   let agent;
   try {
-    agent = await getAgent();
+    agent = await getAgent(session.id);
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : String(err) },
@@ -65,6 +94,9 @@ export async function POST(req: Request) {
     async start(controller) {
       const send = (obj: unknown) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+
+      // 首个事件：告知前端实际使用的会话
+      send({ type: "session", sessionId: session.id, title: session.title });
 
       const unsub = agent!.subscribe(async (event) => {
         const ui = mapEvent(event);
@@ -89,9 +121,23 @@ export async function POST(req: Request) {
           message: err instanceof Error ? err.message : String(err),
         });
       } finally {
-        // 阶段 4：把本轮新增的对话轨迹写入情景记忆
+        // 阶段 8：持久化会话消息（全量替换）
         try {
-          const stored = rememberNewMessages(agent!.state.messages);
+          saveSessionMessages(session.id, agent!.state.messages);
+          // 新会话用首条用户消息自动命名
+          if (session.title === "新会话") {
+            const firstUser = agent!.state.messages.find((m) => m.role === "user");
+            if (firstUser) {
+              const t = contentText(firstUser.content).trim().slice(0, 20);
+              if (t) renameSession(session.id, t);
+            }
+          }
+        } catch (err) {
+          console.error("[session] 持久化失败:", err);
+        }
+        // 阶段 4：把消息写入情景记忆（按内容去重，恢复的历史不会重复写入）
+        try {
+          const stored = rememberMessages(agent!.state.messages);
           if (stored > 0) console.log(`[memory] 已写入 ${stored} 条情景记忆`);
         } catch (err) {
           console.error("[memory] 写入失败:", err);

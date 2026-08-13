@@ -178,6 +178,66 @@ export const tools: AgentTool[] = [
     },
   },
   {
+    name: "verify_file",
+    label: "校验文件",
+    description:
+      "自检工具：检查工作区内文件是否存在、返回大小与内容预览（前 200 字符）。提供 expect 参数时，同时检查内容是否包含该片段并返回校验通过/失败。任务完成后用它验证交付物，不要仅口头声称完成。",
+    parameters: Type.Object({
+      path: Type.String({ description: "相对文件路径" }),
+      expect: Type.Optional(
+        Type.String({ description: "期望内容包含的片段（可选）" }),
+      ),
+    }),
+    execute: async (_toolCallId, params) => {
+      const file = resolveInWorkdir(params.path);
+      try {
+        const stat = await fs.stat(file);
+        if (!stat.isFile()) {
+          return {
+            content: [{ type: "text", text: `校验失败: ${params.path} 不是文件` }],
+            details: { path: params.path, exists: true, isFile: false },
+          };
+        }
+        const text = await fs.readFile(file, "utf-8");
+        const preview = text.slice(0, 200);
+        if (params.expect !== undefined) {
+          const matched = text.includes(params.expect);
+          return {
+            content: [
+              {
+                type: "text",
+                text: matched
+                  ? `校验通过: ${params.path} 包含预期内容 "${params.expect}"`
+                  : `校验失败: ${params.path} 不包含 "${params.expect}"（内容: ${preview}）`,
+              },
+            ],
+            details: {
+              path: params.path,
+              exists: true,
+              size: stat.size,
+              matched,
+              preview,
+            },
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${params.path} 存在，大小 ${stat.size} 字节\n${preview}`,
+            },
+          ],
+          details: { path: params.path, exists: true, size: stat.size, preview },
+        };
+      } catch {
+        return {
+          content: [{ type: "text", text: `文件不存在: ${params.path}` }],
+          details: { path: params.path, exists: false },
+        };
+      }
+    },
+  },
+  {
     name: "todo_create",
     label: "创建任务计划",
     description:
