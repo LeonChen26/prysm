@@ -58,8 +58,10 @@ async function ensureModels(): Promise<ReturnType<typeof createModels>> {
       `不支持的模型提供商: "${DEFAULT_PROVIDER}"。可用: ${Object.keys(PROVIDER_FACTORIES).join(", ")}`,
     );
   }
-  const mod = await factory();
-  const provider = mod[`${DEFAULT_PROVIDER}Provider`]();
+  const mod = (await factory()) as unknown as Record<string, () => unknown>;
+  const provider = mod[`${DEFAULT_PROVIDER}Provider`]() as ReturnType<
+    (typeof PROVIDER_FACTORIES)[ProviderId] extends Promise<infer M> ? M[keyof M] : never
+  >;
   const m = createModels();
   m.setProvider(provider);
   models = m;

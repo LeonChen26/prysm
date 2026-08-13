@@ -8,3 +8,4 @@ agent-memory.db
 sessions.db
 *.log
 .DS_Store
+tsconfig.tsbuildinfo

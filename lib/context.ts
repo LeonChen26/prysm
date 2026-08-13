@@ -11,6 +11,8 @@ export const KEEP_RECENT_MESSAGES = Number(process.env.KEEP_RECENT_MESSAGES ?? 8
 
 /** 把 AgentMessage 的 content 提取为纯文本（用于估算与摘要） */
 export function messageText(m: AgentMessage): string {
+  // AgentMessage 联合包含 bashExecution 等无 content 的消息类型
+  if (!("content" in m) || m.content == null) return "";
   const content = m.content;
   if (typeof content === "string") return content;
   return content
@@ -48,7 +50,8 @@ export async function transformContext(
 
   try {
     const summary = await summarize(old);
-    const summaryMessage: AgentMessage = {
+    // 手动构造消息缺少 AssistantMessage 的若干运行时字段，这里只保留对话所需结构
+    const summaryMessage = {
       role: "assistant",
       content: [
         {
@@ -57,7 +60,7 @@ export async function transformContext(
         },
       ],
       timestamp: Date.now(),
-    };
+    } as AgentMessage;
     return [summaryMessage, ...recent];
   } catch (err) {
     // 摘要失败时退化为直接丢弃旧消息，保证对话可继续

@@ -68,6 +68,8 @@ function queryTokens(query: string, topN = 8): string[] {
 
 /** 提取消息纯文本 */
 function messageText(m: AgentMessage): string {
+  // AgentMessage 联合包含 bashExecution 等无 content 的消息类型
+  if (!("content" in m) || m.content == null) return "";
   const content = m.content;
   if (typeof content === "string") return content;
   return content

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { createTodos, formatTodos, listTodos, modifyTodos } from "./todo";
+import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
 import { fetchUrlAsText, webSearch } from "./web";
 
 /** 所有文件工具的作用域：项目下的 agent-workdir 目录 */
@@ -16,7 +16,26 @@ function resolveInWorkdir(relative: string): string {
   return resolved;
 }
 
-export const tools: AgentTool[] = [
+/**
+ * 各工具 execute 收到的参数（运行时来自模型 JSON，Schema 校验由框架完成）。
+ * 必需字段由各自 schema 保证存在，这里仅供 TS 静态检查。
+ */
+interface ToolArgs {
+  dir: string;
+  path: string;
+  content: string;
+  from: string;
+  to: string;
+  query: string;
+  url: string;
+  items: { title: string; detail?: string }[];
+  expect?: string;
+  limit?: number;
+  updates?: TodoUpdate[];
+  append?: { title: string; detail?: string }[];
+}
+
+export const tools: AgentTool<any>[] = [
   {
     name: "list_dir",
     label: "列出目录",
@@ -27,7 +46,8 @@ export const tools: AgentTool[] = [
         Type.String({ description: "相对路径目录，默认 '' 表示工作区根目录" }),
       ),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const dir = resolveInWorkdir(params.dir ?? "");
       const entries = await fs.readdir(dir, { withFileTypes: true });
       const lines = entries.map((e) => (e.isDirectory() ? `[dir] ${e.name}` : e.name));
@@ -44,7 +64,8 @@ export const tools: AgentTool[] = [
     parameters: Type.Object({
       path: Type.String({ description: "相对文件路径" }),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const file = resolveInWorkdir(params.path);
       const stat = await fs.stat(file);
       if (stat.size > 100 * 1024) {
@@ -65,7 +86,8 @@ export const tools: AgentTool[] = [
       path: Type.String({ description: "相对文件路径" }),
       content: Type.String({ description: "要写入的完整内容" }),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const file = resolveInWorkdir(params.path);
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, params.content, "utf-8");
@@ -89,7 +111,8 @@ export const tools: AgentTool[] = [
       path: Type.String({ description: "相对文件路径" }),
       content: Type.String({ description: "要追加的内容" }),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const file = resolveInWorkdir(params.path);
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.appendFile(file, params.content, "utf-8");
@@ -111,7 +134,8 @@ export const tools: AgentTool[] = [
     parameters: Type.Object({
       path: Type.String({ description: "相对目录路径" }),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const dir = resolveInWorkdir(params.path);
       await fs.mkdir(dir, { recursive: true });
       return {
@@ -128,7 +152,8 @@ export const tools: AgentTool[] = [
       from: Type.String({ description: "源相对路径（文件或目录）" }),
       to: Type.String({ description: "目标相对路径" }),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const src = resolveInWorkdir(params.from);
       const dst = resolveInWorkdir(params.to);
       await fs.mkdir(path.dirname(dst), { recursive: true });
@@ -149,7 +174,8 @@ export const tools: AgentTool[] = [
       from: Type.String({ description: "源相对文件路径" }),
       to: Type.String({ description: "目标相对文件路径" }),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const src = resolveInWorkdir(params.from);
       const dst = resolveInWorkdir(params.to);
       await fs.mkdir(path.dirname(dst), { recursive: true });
@@ -169,7 +195,8 @@ export const tools: AgentTool[] = [
     parameters: Type.Object({
       path: Type.String({ description: "相对文件路径" }),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const file = resolveInWorkdir(params.path);
       await fs.unlink(file);
       return {
@@ -189,7 +216,8 @@ export const tools: AgentTool[] = [
         Type.String({ description: "期望内容包含的片段（可选）" }),
       ),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const file = resolveInWorkdir(params.path);
       try {
         const stat = await fs.stat(file);
@@ -252,7 +280,8 @@ export const tools: AgentTool[] = [
         { description: "子任务列表（按执行顺序）" },
       ),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const { todos, msg } = createTodos(params.items);
       return {
         content: [{ type: "text", text: `${msg}\n${formatTodos(todos)}` }],
@@ -291,7 +320,8 @@ export const tools: AgentTool[] = [
         ),
       ),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const { todos, msg } = modifyTodos(params.updates, params.append);
       return {
         content: [{ type: "text", text: `${msg}\n${formatTodos(todos)}` }],
@@ -327,7 +357,8 @@ export const tools: AgentTool[] = [
         }),
       ),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const results = await webSearch(params.query, params.limit ?? 5);
       if (results.length === 0) {
         return {
@@ -354,7 +385,8 @@ export const tools: AgentTool[] = [
     parameters: Type.Object({
       url: Type.String({ description: "网页 URL（http/https）" }),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
       const page = await fetchUrlAsText(params.url);
       const body = page.text || "(页面无可读文本内容)";
       return {
