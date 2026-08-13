@@ -87,3 +87,24 @@ export function listTodos(): { todos: TodoItem[]; msg: string } {
         : `当前任务清单：\n${formatTodos(todos)}`,
   };
 }
+
+/** todo_reorder：按给定 id 顺序重排清单（未提及的项按原相对顺序排在末尾） */
+export function reorderTodos(ids: string[]): { todos: TodoItem[]; msg: string } {
+  const map = new Map(todos.map((t) => [t.id, t]));
+  const next: TodoItem[] = [];
+  for (const id of ids) {
+    const t = map.get(id);
+    if (t) next.push(t);
+  }
+  for (const t of todos) {
+    if (!ids.includes(t.id)) next.push(t);
+  }
+  todos = next;
+  return { todos: snapshot(), msg: "任务顺序已更新。" };
+}
+
+/** todo_remove：按 id 删除子任务 */
+export function removeTodos(ids: string[]): { todos: TodoItem[]; msg: string } {
+  todos = todos.filter((t) => !ids.includes(t.id));
+  return { todos: snapshot(), msg: "已删除任务。" };
+}

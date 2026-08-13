@@ -307,6 +307,104 @@ body {
   margin-bottom: 12px;
 }
 
+.session-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-multi {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.session-multi:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.session-batch-del {
+  border: none;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  background: var(--danger);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.session-batch-del:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.session-batch-del:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.session-batch-cancel {
+  border: none;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.session-batch-cancel:hover {
+  background: var(--surface-filled);
+}
+
+.session-selected {
+  background: var(--brand-soft);
+}
+
+.session-selected .session-item-title {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.session-check {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1.5px solid var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.session-check-on {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.session-check-on::after {
+  content: "";
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
 .session-title {
   font-size: 12px;
   font-weight: 600;
@@ -1176,6 +1274,77 @@ body {
   text-decoration: line-through;
 }
 
+/* todo 拖拽 / 删除 / 追加 */
+.todo-item {
+  cursor: grab;
+}
+
+.todo-item:active {
+  cursor: grabbing;
+}
+
+.todo-del {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.todo-item:hover .todo-del {
+  display: flex;
+}
+
+.todo-del:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.todo-append {
+  margin-top: 8px;
+}
+
+.todo-append-btn {
+  width: 100%;
+  padding: 6px 0;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.todo-append-btn:hover {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.todo-append-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--brand);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent);
+}
+
 /* ---------- Tool cards ---------- */
 .card-list {
   list-style: none;
@@ -1230,6 +1399,33 @@ body {
 
 .card-error {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+/* 运行中卡片的底部不定进度线 */
+.card-indeterminate {
+  position: relative;
+  overflow: hidden;
+}
+
+.card-indeterminate::after {
+  content: "";
+  position: absolute;
+  left: -40%;
+  bottom: 0;
+  width: 40%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--warning), transparent);
+  animation: indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  from {
+    left: -40%;
+  }
+  to {
+    left: 100%;
+  }
 }
 
 .card-name {

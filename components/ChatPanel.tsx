@@ -21,6 +21,10 @@ interface ToolCard {
   args: unknown;
   status: "running" | "done" | "error";
   result?: string;
+  /** 工具开始时间戳（用于计算耗时） */
+  startedAt?: number;
+  /** 工具执行耗时（毫秒） */
+  elapsedMs?: number;
 }
 
 interface TodoItem {
@@ -152,6 +156,12 @@ function formatRelTime(ts: number): string {
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+/** 工具耗时：<1s 显示毫秒，否则保留一位小数秒 */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 /** Markdown 代码块：hover 显示复制按钮 */
 function CodeBlock({ children }: { children?: React.ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
@@ -195,6 +205,14 @@ export function ChatPanel() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  /** 会话多选批量删除模式 */
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  /** todo 追加步骤 */
+  const [todoAppendOpen, setTodoAppendOpen] = useState(false);
+  const [todoAppendText, setTodoAppendText] = useState("");
+  /** todo 拖拽：记录被拖动的项 id */
+  const todoDragRef = useRef<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   /** busy 的同步镜像，避免 useCallback 闭包读到过期值 */
   const busyRef = useRef(false);
@@ -430,20 +448,22 @@ export function ChatPanel() {
                   toolName: ev.toolName!,
                   args: ev.args,
                   status: "running",
+                  startedAt: Date.now(),
                 },
               ]);
               break;
             case "tool_end":
               setCards((c) =>
-                c.map((card) =>
-                  card.id === ev.id
-                    ? {
-                        ...card,
-                        status: ev.isError ? "error" : "done",
-                        result: ev.result,
-                      }
-                    : card,
-                ),
+                c.map((card) => {
+                  if (card.id !== ev.id) return card;
+                  return {
+                    ...card,
+                    status: ev.isError ? "error" : "done",
+                    result: ev.result,
+                    elapsedMs:
+                      Date.now() - (card.startedAt ?? Date.now()),
+                  };
+                }),
               );
               if (ev.todos) setTodos(ev.todos);
               break;
@@ -622,6 +642,105 @@ export function ChatPanel() {
     });
   }, []);
 
+  /** 退出会话多选模式 */
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  /** 批量删除选中的会话 */
+  const batchDelete = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    const ids = [...selectedIds];
+    for (const id of ids) {
+      try {
+        await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+      } catch {
+        /* 单个失败不阻断批量删除 */
+      }
+    }
+    const remaining = sessions.filter((s) => !selectedIds.has(s.id));
+    setSessions(remaining);
+    if (sessionId && selectedIds.has(sessionId)) {
+      setCards([]);
+      setTodos([]);
+      setApprovals([]);
+      setError(null);
+      if (remaining.length > 0) {
+        switchSession(remaining[0].id);
+      } else {
+        setSessionId(null);
+        setMessages([]);
+      }
+    }
+    exitSelectMode();
+  }, [selectedIds, sessions, sessionId, switchSession, exitSelectMode]);
+
+  /** todo 拖拽落点：把拖动的项移到目标项之前 */
+  const handleTodoDrop = useCallback(
+    async (targetId: string) => {
+      const fromId = todoDragRef.current;
+      todoDragRef.current = null;
+      if (!fromId || fromId === targetId) return;
+      const ids = todos.map((t) => t.id);
+      const from = ids.indexOf(fromId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, fromId);
+      const map = new Map(todos.map((t) => [t.id, t]));
+      setTodos(ids.map((id) => map.get(id)!).filter(Boolean));
+      try {
+        const res = await fetch("/api/todos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "reorder", ids }),
+        });
+        const data = await res.json();
+        if (data?.todos) setTodos(data.todos);
+      } catch {
+        setError("排序同步失败");
+      }
+    },
+    [todos],
+  );
+
+  /** 删除单个 todo 步骤 */
+  const removeTodo = useCallback(async (id: string) => {
+    try {
+      const res = await fetch("/api/todos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remove", ids: [id] }),
+      });
+      const data = await res.json();
+      if (data?.todos) setTodos(data.todos);
+      else if (data?.error) setError(data.error);
+    } catch {
+      setError("删除步骤失败");
+    }
+  }, []);
+
+  /** 追加 todo 步骤 */
+  const appendTodo = useCallback(async () => {
+    const title = todoAppendText.trim();
+    if (!title) return;
+    setTodoAppendText("");
+    setTodoAppendOpen(false);
+    try {
+      const res = await fetch("/api/todos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "append", items: [{ title }] }),
+      });
+      const data = await res.json();
+      if (data?.todos) setTodos(data.todos);
+      else if (data?.error) setError(data.error);
+    } catch {
+      setError("添加步骤失败");
+    }
+  }, [todoAppendText]);
+
   return (
     <div className="app">
       <header className="app-header">
@@ -678,15 +797,56 @@ export function ChatPanel() {
       <main className="app-main">
         <aside className="session-panel">
           <div className="session-head">
-            <span className="session-title">会话</span>
-            <button
-              className="session-new"
-              onClick={newSession}
-              disabled={busy}
-              title="新建会话"
-            >
-              ＋
-            </button>
+            <span className="session-title">
+              {selectMode ? `已选 ${selectedIds.size}` : "会话"}
+            </span>
+            {selectMode ? (
+              <div className="session-head-actions">
+                <button
+                  className="session-batch-del"
+                  disabled={selectedIds.size === 0}
+                  onClick={batchDelete}
+                >
+                  删除
+                </button>
+                <button
+                  className="session-batch-cancel"
+                  onClick={exitSelectMode}
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <div className="session-head-actions">
+                <button
+                  className="session-multi"
+                  onClick={() => setSelectMode(true)}
+                  title="多选删除"
+                  aria-label="多选删除"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="4" />
+                  </svg>
+                </button>
+                <button
+                  className="session-new"
+                  onClick={newSession}
+                  disabled={busy}
+                  title="新建会话"
+                >
+                  ＋
+                </button>
+              </div>
+            )}
           </div>
           <div className="session-search">
             <input
@@ -739,39 +899,58 @@ export function ChatPanel() {
                                 />
                               ) : (
                                 <button
-                                  className={`session-item ${s.id === sessionId ? "session-active" : ""}`}
-                                  onClick={() => switchSession(s.id)}
+                                  className={`session-item ${s.id === sessionId && !selectMode ? "session-active" : ""} ${selectedIds.has(s.id) ? "session-selected" : ""}`}
+                                  onClick={() => {
+                                    if (selectMode) {
+                                      setSelectedIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(s.id)) next.delete(s.id);
+                                        else next.add(s.id);
+                                        return next;
+                                      });
+                                    } else {
+                                      switchSession(s.id);
+                                    }
+                                  }}
                                 >
+                                  {selectMode && (
+                                    <span
+                                      className={`session-check ${selectedIds.has(s.id) ? "session-check-on" : ""}`}
+                                      aria-hidden="true"
+                                    />
+                                  )}
                                   <span className="session-item-title">
                                     {s.title || "未命名会话"}
                                   </span>
                                   <span className="session-item-time">
                                     {formatRelTime(s.updatedAt)}
                                   </span>
-                                  <span className="session-item-actions">
-                                    <span
-                                      className="session-item-act"
-                                      role="button"
-                                      title="重命名会话"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        startRename(s.id, s.title || "");
-                                      }}
-                                    >
-                                      ✎
+                                  {!selectMode && (
+                                    <span className="session-item-actions">
+                                      <span
+                                        className="session-item-act"
+                                        role="button"
+                                        title="重命名会话"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          startRename(s.id, s.title || "");
+                                        }}
+                                      >
+                                        ✎
+                                      </span>
+                                      <span
+                                        className="session-item-act session-item-del"
+                                        role="button"
+                                        title="删除会话"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          removeSession(s.id);
+                                        }}
+                                      >
+                                        ×
+                                      </span>
                                     </span>
-                                    <span
-                                      className="session-item-act session-item-del"
-                                      role="button"
-                                      title="删除会话"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        removeSession(s.id);
-                                      }}
-                                    >
-                                      ×
-                                    </span>
-                                  </span>
+                                  )}
                                 </button>
                               )}
                             </li>
@@ -1003,7 +1182,27 @@ export function ChatPanel() {
                 </div>
                 <ol className="todo-list">
                   {todos.map((t) => (
-                    <li key={t.id} className={`todo-item todo-${t.status}`}>
+                    <li
+                      key={t.id}
+                      draggable
+                      className={`todo-item todo-${t.status}`}
+                      title="拖拽调整顺序"
+                      onDragStart={(e) => {
+                        todoDragRef.current = t.id;
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        handleTodoDrop(t.id);
+                      }}
+                      onDragEnd={() => {
+                        todoDragRef.current = null;
+                      }}
+                    >
                       <span className="todo-mark" aria-hidden="true">
                         {t.status === "completed" ? "✓" : ""}
                       </span>
@@ -1016,9 +1215,45 @@ export function ChatPanel() {
                       <span className="todo-state">
                         {TODO_STATUS_LABELS[t.status]}
                       </span>
+                      <button
+                        type="button"
+                        className="todo-del"
+                        title="删除该步骤"
+                        aria-label="删除该步骤"
+                        onClick={() => removeTodo(t.id)}
+                      >
+                        ×
+                      </button>
                     </li>
                   ))}
                 </ol>
+                <div className="todo-append">
+                  {todoAppendOpen ? (
+                    <input
+                      className="todo-append-input"
+                      value={todoAppendText}
+                      autoFocus
+                      placeholder="新步骤名称，Enter 添加"
+                      onChange={(e) => setTodoAppendText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") appendTodo();
+                        if (e.key === "Escape") {
+                          setTodoAppendOpen(false);
+                          setTodoAppendText("");
+                        }
+                      }}
+                      onBlur={appendTodo}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="todo-append-btn"
+                      onClick={() => setTodoAppendOpen(true)}
+                    >
+                      ＋ 添加步骤
+                    </button>
+                  )}
+                </div>
               </div>
             )}
             {cards.length === 0 ? (
@@ -1030,7 +1265,7 @@ export function ChatPanel() {
                 {cards.map((card) => (
                   <li
                     key={card.id}
-                    className={`card card-${card.status}`}
+                    className={`card card-${card.status} ${card.status === "running" ? "card-indeterminate" : ""}`}
                   >
                     <div className="card-head">
                       <span className={`card-badge card-badge-${card.status}`}>
@@ -1043,9 +1278,7 @@ export function ChatPanel() {
                       <span className="card-state">
                         {card.status === "running"
                           ? "运行中"
-                          : card.status === "done"
-                            ? "完成"
-                            : "失败"}
+                          : `${card.status === "done" ? "完成" : "失败"}${card.elapsedMs != null ? ` · ${formatDuration(card.elapsedMs)}` : ""}`}
                       </span>
                     </div>
                     <code className="card-args">
