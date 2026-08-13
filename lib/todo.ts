@@ -117,7 +117,7 @@ export function createTodos(
   // 覆盖式：清空旧清单并重置序号，保证新 id 从 todo-1 开始（不受恢复的历史干扰）
   todos = [];
   seq = 0;
-  todos = items.map((it, i) => ({
+  todos = items.map((it) => ({
     id: genId(),
     title: it.title,
     detail: it.detail,

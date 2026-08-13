@@ -481,7 +481,6 @@ export function ChatPanel() {
   /** 浏览器通知开关（任务完成时提醒） */
   const [notifyOn, setNotifyOn] = useState(false);
   /** 工作区文件浏览器 */
-  const [wbOpen, setWbOpen] = useState(false);
   const [wbDirs, setWbDirs] = useState<
     Record<string, { name: string; isDir: boolean; size: number; mtime: number }[]>
   >({});

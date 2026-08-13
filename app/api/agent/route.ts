@@ -171,7 +171,6 @@ export async function POST(req: Request) {
         try {
           saveSessionMessages(session.id, msgs);
           // 新会话用首条用户消息自动命名
-          let renamed = false;
           if (session.title === "新会话") {
             const firstUser = msgs.find((m) => m.role === "user");
             if (firstUser) {
@@ -179,7 +178,6 @@ export async function POST(req: Request) {
               if (t) {
                 renameSession(session.id, t);
                 session.title = t;
-                renamed = true;
               }
             }
           }
