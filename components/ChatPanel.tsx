@@ -2,11 +2,14 @@
 
 import {
   Fragment,
+  isValidElement,
   useCallback,
   useEffect,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactElement,
+  type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -283,7 +286,93 @@ function ThinkingBlock({ children }: { children?: React.ReactNode }) {
   );
 }
 
-/** Markdown 代码块：hover 显示复制按钮；```thinking 语言渲染为折叠的思考块 */
+/** 递归提取 React 节点文本（用于代码块语言内容） */
+function nodeToText(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeToText).join("");
+  if (isValidElement(node)) {
+    const props = (node as ReactElement<{ children?: ReactNode }>).props;
+    return nodeToText(props?.children);
+  }
+  return "";
+}
+
+/** 从消息文本中提取独立的 wb:// 文件引用行（跳过围栏代码块），并从正文移除 */
+function extractFileRefs(text: string): { cleaned: string; refs: { path: string }[] } {
+  const refs: { path: string }[] = [];
+  let inFence = false;
+  const cleaned = text
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      const m = /^wb:\/\/(\S+)\s*$/.exec(line.trim());
+      if (m) {
+        refs.push({ path: m[1] });
+        return "";
+      }
+      return line;
+    })
+    .join("\n");
+  return { cleaned, refs };
+}
+
+/** Mermaid 流程图：客户端懒加载渲染 ```mermaid 代码块 */
+function MermaidDiagram({ code }: { code: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
+  const [errText, setErrText] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    (async () => {
+      try {
+        // 跟随全局主题（html[data-theme]）
+        const dark = document.documentElement.dataset.theme === "dark";
+        const mermaid = (await import("mermaid")).default;
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: dark ? "dark" : "default",
+        });
+        const id = `m-${Math.random().toString(36).slice(2, 10)}`;
+        const { svg } = await mermaid.render(id, code);
+        if (cancelled) return;
+        if (ref.current) ref.current.innerHTML = svg;
+        setStatus("done");
+      } catch (err) {
+        if (cancelled) return;
+        setStatus("error");
+        setErrText(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
+
+  if (status === "error") {
+    return (
+      <div className="mermaid-block mermaid-error">
+        <pre>{code}</pre>
+        <p className="mermaid-err">图表解析失败：{errText.slice(0, 140)}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="mermaid-block">
+      {status === "loading" && <span className="mermaid-loading">渲染图表中…</span>}
+      <div ref={ref} className="mermaid-svg" />
+    </div>
+  );
+}
+
+/** Markdown 代码块：hover 显示复制按钮；```thinking 语言渲染为折叠的思考块；```mermaid 渲染流程图 */
 function CodeBlock({ children }: { children?: React.ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
@@ -296,6 +385,9 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
   const isThinking =
     !!childProps && /language-thinking/i.test(String(childProps.className ?? ""));
   if (isThinking) return <ThinkingBlock>{children}</ThinkingBlock>;
+  const isMermaid =
+    !!childProps && /language-mermaid/i.test(String(childProps.className ?? ""));
+  if (isMermaid) return <MermaidDiagram code={nodeToText(children)} />;
   const copy = async () => {
     if (!ref.current) return;
     try {
@@ -2000,6 +2092,9 @@ export function ChatPanel() {
               ]
                 .filter(Boolean)
                 .join(" ");
+              const { cleaned: mdText, refs: fileRefs } = extractFileRefs(
+                msgCollapsed ? m.text.slice(0, 3000) + "\n\n…" : m.text,
+              );
               return (
                 <Fragment key={i}>
                   <div
@@ -2032,13 +2127,40 @@ export function ChatPanel() {
                   <div className="message-body">
                     {m.text ? (
                       <>
+                        {fileRefs.length > 0 && (
+                          <div className="fileref-cards">
+                            {fileRefs.map((r, ri) => (
+                              <button
+                                key={ri}
+                                type="button"
+                                className="fileref-card"
+                                title={`点击预览 ${r.path}`}
+                                onClick={() => openFile(r.path)}
+                              >
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                  <path d="M14 2v6h6" />
+                                </svg>
+                                <span className="fileref-path">{r.path}</span>
+                                <span className="fileref-open">预览</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         <div className="md">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkMath]}
                             rehypePlugins={[rehypeHighlight, rehypeKatex]}
                             components={{ ...markdownComponents, pre: CodeBlock }}
                           >
-                            {msgCollapsed ? m.text.slice(0, 3000) + "\n\n…" : m.text}
+                            {mdText}
                           </ReactMarkdown>
                         </div>
                         {longMsg && (
@@ -2198,6 +2320,19 @@ export function ChatPanel() {
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   send();
+                  return;
+                }
+                // ↑ 键：回退编辑上一条用户消息（输入为空、或编辑态中继续回退更早消息）
+                if (e.key === "ArrowUp" && !e.shiftKey && !busyRef.current) {
+                  if (input.trim() && editingIndex < 0) return; // 有未发送内容时不覆盖
+                  const startFrom = editingIndex >= 0 ? editingIndex : messages.length;
+                  for (let i = startFrom - 1; i >= 0; i--) {
+                    if (messages[i].role === "user") {
+                      e.preventDefault();
+                      startEdit(i);
+                      break;
+                    }
+                  }
                 }
               }}
               placeholder="描述任务…（/help 查看命令，Enter 发送）"

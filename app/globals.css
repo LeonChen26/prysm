@@ -2798,6 +2798,91 @@ body {
   padding: 2px 0;
 }
 
+/* Mermaid 流程图渲染块 */
+.mermaid-block {
+  margin: 10px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow-x: auto;
+}
+.mermaid-block .mermaid-svg {
+  display: flex;
+  justify-content: center;
+  min-width: min-content;
+}
+.mermaid-block .mermaid-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-loading {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--text-tertiary, var(--text-secondary));
+  padding: 4px 2px;
+}
+.mermaid-error pre {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  background: rgba(255, 0, 0, 0.05);
+  border-radius: 8px;
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mermaid-err {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #e5484d;
+}
+
+/* 消息内工作区文件引用卡片（wb:// 路径） */
+.fileref-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.fileref-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.fileref-card:hover {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+}
+.fileref-card svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--brand);
+}
+.fileref-path {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  word-break: break-all;
+}
+.fileref-open {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+
 .code-copy {
   position: absolute;
   top: 8px;
