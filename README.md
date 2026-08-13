@@ -148,6 +148,7 @@ npx tsx test-policy.ts     # 审批白名单策略
 npx tsx test-fileops.ts    # 文件操作工具
 npx tsx test-web.ts        # 联网搜索 / 网页抓取
 npx tsx test-verify.ts     # verify_file 自检
-npx tsx test-stop.ts       # 停止会话
 npx tsx test-parallel.ts   # 并行工具执行
+npx tsx test-context.ts    # 上下文压缩
+npx tsx test-approval.ts   # 工具审批流
 ```
