@@ -306,6 +306,12 @@ export function ChatPanel() {
     }[]
   >([]);
   const [logsOpen, setLogsOpen] = useState(false);
+  /** 审批历史：最近审批决定 + 折叠 */
+  const [audits, setAudits] = useState<
+    { id: number; toolName: string; args: string; action: string; ts: number }[]
+  >([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditOpen, setAuditOpen] = useState(false);
   /** 浏览器通知开关（任务完成时提醒） */
   const [notifyOn, setNotifyOn] = useState(false);
   /** 工作区文件浏览器 */
@@ -332,6 +338,7 @@ export function ChatPanel() {
   /** todo 拖拽：记录被拖动的项 id */
   const todoDragRef = useRef<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const sessionSearchRef = useRef<HTMLInputElement>(null);
   /** busy 的同步镜像，避免 useCallback 闭包读到过期值 */
   const busyRef = useRef(false);
   /** 智能滚动：用户停留在底部时才自动跟随；主动滚动离开底部则暂停 */
@@ -575,6 +582,38 @@ export function ChatPanel() {
     }
   }, []);
 
+  /** 拉取最近审批历史 */
+  const refreshAudits = useCallback(async () => {
+    try {
+      const r = await fetch("/api/audit?limit=50");
+      const data = await r.json();
+      if (Array.isArray(data?.approvals)) {
+        setAudits(data.approvals);
+        setAuditTotal(Number(data.total ?? data.approvals.length));
+      }
+    } catch {
+      /* 静默 */
+    }
+  }, []);
+
+  /** 清空审批历史 */
+  const clearAudits = useCallback(async () => {
+    try {
+      const r = await fetch("/api/audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear" }),
+      });
+      const data = await r.json();
+      if (data?.ok) {
+        setAudits([]);
+        setAuditTotal(0);
+      }
+    } catch {
+      setError("清空审批历史失败");
+    }
+  }, []);
+
   /** 删除单条情景记忆 */
   const removeMemory = useCallback(
     async (id: number) => {
@@ -744,6 +783,10 @@ export function ChatPanel() {
   useEffect(() => {
     refreshRunLogs();
   }, [refreshRunLogs]);
+  // 初始拉取审批历史
+  useEffect(() => {
+    refreshAudits();
+  }, [refreshAudits]);
   // 初始加载工作区根目录
   useEffect(() => {
     loadDir("");
@@ -998,6 +1041,7 @@ export function ChatPanel() {
             case "done": {
               const s = sessions.find((x) => x.id === sessionId);
               notifyCompletion(s?.title ?? "");
+              refreshAudits();
               break;
             }
           }
@@ -1012,7 +1056,7 @@ export function ChatPanel() {
         refreshRunLogs();
       }
     },
-    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, sessions, notifyCompletion],
+    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, sessions, notifyCompletion],
   );
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
@@ -1020,6 +1064,31 @@ export function ChatPanel() {
     const text = input.trim();
     if (!text) return;
     setInput("");
+    // 斜杠命令：/new /clear /export /theme /help
+    if (text.startsWith("/")) {
+      const cmd = text.split(/\s+/)[0].toLowerCase();
+      switch (cmd) {
+        case "/new":
+          await newSession();
+          return;
+        case "/clear":
+          if (sessionId) await clearSession(sessionId);
+          return;
+        case "/export":
+          if (sessionId) exportSession(sessionId, "md");
+          return;
+        case "/theme":
+          toggleTheme();
+          return;
+        case "/help":
+          setInfo(
+            "可用命令：/new 新建会话 · /clear 清空当前会话 · /export 导出 Markdown · /theme 切换主题 · /help 帮助",
+          );
+          return;
+        default:
+          break; // 非命令则按普通消息发送
+      }
+    }
     if (editingIndex >= 0 && messages[editingIndex]?.role === "user") {
       const idx = editingIndex;
       setEditingIndex(-1);
@@ -1029,7 +1098,17 @@ export function ChatPanel() {
       return;
     }
     await streamReply(text);
-  }, [input, streamReply, editingIndex, messages]);
+  }, [
+    input,
+    streamReply,
+    editingIndex,
+    messages,
+    newSession,
+    sessionId,
+    clearSession,
+    exportSession,
+    toggleTheme,
+  ]);
 
   /** 进入消息编辑态：载入输入框并聚焦 */
   const startEdit = useCallback(
@@ -1328,6 +1407,24 @@ export function ChatPanel() {
     });
   }, []);
 
+  // 全局快捷键：Ctrl/Cmd+N 新建会话、Ctrl/Cmd+K 聚焦会话搜索
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "n") {
+        e.preventDefault();
+        newSession();
+      } else if (k === "k") {
+        e.preventDefault();
+        sessionSearchRef.current?.focus();
+        sessionSearchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newSession]);
+
   /** 渲染工作区目录树（递归，懒加载） */
   const renderWbTree = (dir: string, depth: number): React.ReactNode => {
     const entries = wbDirs[dir] ?? [];
@@ -1509,6 +1606,7 @@ export function ChatPanel() {
           </div>
           <div className="session-search">
             <input
+              ref={sessionSearchRef}
               value={sessionQuery}
               onChange={(e) => setSessionQuery(e.target.value)}
               placeholder="搜索会话 / 消息…"
@@ -1965,7 +2063,7 @@ export function ChatPanel() {
                   send();
                 }
               }}
-              placeholder="描述你要完成的任务…（Enter 发送，Shift+Enter 换行）"
+              placeholder="描述任务…（/help 查看命令，Enter 发送）"
               disabled={busy}
               rows={1}
             />
@@ -2195,6 +2293,57 @@ export function ChatPanel() {
                 }}
               >
                 {logsOpen ? "收起日志" : "查看日志"}
+              </button>
+            </div>
+            <div className="audit-section">
+              <div className="panel-title audit-head">
+                <h2>审批历史</h2>
+                <span className="panel-count">{auditTotal}</span>
+              </div>
+              {auditOpen && audits.length > 0 && (
+                <div className="audit-body">
+                  {audits.map((a) => (
+                    <div
+                      key={a.id}
+                      className={`audit-item audit-${a.action}`}
+                    >
+                      <div className="audit-item-head">
+                        <span className="audit-tool">
+                          {TOOL_META[a.toolName]?.label ?? a.toolName}
+                        </span>
+                        <span className="audit-action">
+                          {a.action === "approved"
+                            ? "允许"
+                            : a.action === "denied"
+                              ? "拒绝"
+                              : "超时"}
+                        </span>
+                        <span className="audit-time">{formatMsgTime(a.ts)}</span>
+                      </div>
+                      <code className="audit-args">{a.args?.slice(0, 100)}</code>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="audit-clear"
+                    onClick={clearAudits}
+                  >
+                    清空历史
+                  </button>
+                </div>
+              )}
+              {auditOpen && audits.length === 0 && (
+                <p className="audit-empty">暂无审批记录</p>
+              )}
+              <button
+                type="button"
+                className="audit-toggle"
+                onClick={() => {
+                  setAuditOpen((v) => !v);
+                  if (!auditOpen) refreshAudits();
+                }}
+              >
+                {auditOpen ? "收起历史" : "查看历史"}
               </button>
             </div>
             {approvals.length > 0 && (

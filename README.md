@@ -9,6 +9,8 @@
 - **上下文压缩**：对话超长时自动摘要化旧消息，节省 token
 - **情景记忆**：跨会话检索历史 episode，自动注入相关上下文（SQLite 持久化于 `agent-memory.db`），侧栏可查看 / 删除 / 清空记忆
 - **工具审批**：敏感操作（写文件 / 删文件 / 执行命令）先征求用户确认；支持白名单规则自动放行
+- **审批历史审计**：每次审批决定（同意 / 拒绝 / 超时）持久化到 `audit.db`，侧栏可查看与清空，支持回溯
+- **快捷键与命令**：`Ctrl/Cmd+N` 新建会话、`Ctrl/Cmd+K` 聚焦会话搜索；输入 `/new` `/clear` `/export` `/theme` `/help` 斜杠命令快速操作
 - **并行工具执行**：单条消息含多个工具调用时并行执行，可切换为串行
 - **联网搜索**：bing（默认，国内可直连）/ duckduckgo
 - **系统工具**：`env_info` 查看运行环境、`port_check` 排查端口占用
@@ -122,6 +124,8 @@ pm2 start .next/standalone/server.js --name workbuddy-agent
 | `POST /api/agent` | 发送消息，SSE 流式返回 Agent 事件 |
 | `POST /api/agent/stop` | 停止当前会话的 Agent |
 | `POST /api/agent/approve` | 审批操作（同意 / 拒绝） |
+| `GET /api/audit` | 审批历史列表（`?limit=` 默认 50） |
+| `POST /api/audit` | 清空审批历史（`{ action: "clear" }`） |
 | `GET /api/agent/logs` | 最近 Agent 运行日志（`POST` 传 `{ action: "clear" }` 清空） |
 | `POST /api/todos` | 待办操作（append / remove / reorder） |
 | `GET /api/memory` | 情景记忆列表（`?limit=&offset=`） |
@@ -163,8 +167,9 @@ pm2 start .next/standalone/server.js --name workbuddy-agent
 | `sessions.db` | 会话与消息历史（SQLite） |
 | `agent-memory.db` | 情景记忆库（SQLite） |
 | `todo.db` | 任务计划持久化（SQLite） |
+| `audit.db` | 审批历史审计（SQLite） |
 
-> 三者在 standalone 产物中位于运行目录下，部署时注意持久化挂载。
+> 四者在 standalone 产物中位于运行目录下，部署时注意持久化挂载。
 
 ## 测试脚本
 
@@ -180,4 +185,6 @@ npx tsx test-verify.ts     # verify_file 自检
 npx tsx test-parallel.ts   # 并行工具执行
 npx tsx test-context.ts    # 上下文压缩
 npx tsx test-approval.ts   # 工具审批流
+npx tsx test-audit.ts      # 审批历史审计
+npx tsx test-workdir.ts    # 工作区文件浏览器
 ```
