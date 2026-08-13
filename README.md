@@ -23,6 +23,8 @@
 - **渲染体验**：LaTeX 公式（KaTeX）、`thinking` 代码块折叠为思考过程、GFM 任务列表 checkbox、消息时间显示、流式打字机光标、消息平滑淡入
 - **命令执行**：`run_bash` 工具在工作区内执行 shell 命令（需审批）
 - **运行日志**：记录每次 Agent 执行（耗时 / 消息数 / 结果），侧栏可查看
+- **工具执行内联展示**：任务执行时工具卡片（名称 / 参数 / 结果）实时内联到消息流中，结束后保留回顾
+- **运行统计概览**：侧栏展示总运行 / 成功率 / 总耗时 / 平均耗时、最近 7 天运行柱状图、工具使用排行
 - **智能标题**：对话多轮后自动生成精炼会话标题
 - **工作区文件浏览器**：侧栏可视化 agent-workdir 目录树，支持浏览 / 预览 / 新建 / 上传文件
 - **完成通知**：任务结束且页面不在前台时发送浏览器通知（铃铛开关）
@@ -127,6 +129,7 @@ pm2 start .next/standalone/server.js --name workbuddy-agent
 | `GET /api/audit` | 审批历史列表（`?limit=` 默认 50） |
 | `POST /api/audit` | 清空审批历史（`{ action: "clear" }`） |
 | `GET /api/agent/logs` | 最近 Agent 运行日志（`POST` 传 `{ action: "clear" }` 清空） |
+| `GET /api/stats` | 运行统计概览（成功率 / 耗时 / 工具排行 / 按天分布） |
 | `POST /api/todos` | 待办操作（append / remove / reorder） |
 | `GET /api/memory` | 情景记忆列表（`?limit=&offset=`） |
 | `DELETE /api/memory?id=xxx` | 删除单条记忆 |
@@ -187,4 +190,5 @@ npx tsx test-context.ts    # 上下文压缩
 npx tsx test-approval.ts   # 工具审批流
 npx tsx test-audit.ts      # 审批历史审计
 npx tsx test-workdir.ts    # 工作区文件浏览器
+npx tsx test-stats.ts      # 运行统计聚合
 ```

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -131,6 +132,24 @@ interface SseEvent {
   sessionId?: string;
   title?: string;
   message?: string;
+}
+
+interface RunStats {
+  totalRuns: number;
+  okRuns: number;
+  failedRuns: number;
+  stoppedRuns: number;
+  successRate: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  toolRanking: { name: string; count: number }[];
+  byDay: {
+    day: string;
+    runs: number;
+    okRuns: number;
+    failedRuns: number;
+    durationMs: number;
+  }[];
 }
 
 async function readSSE(response: Response, onEvent: (ev: SseEvent) => void) {
@@ -351,6 +370,9 @@ export function ChatPanel() {
   >([]);
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditOpen, setAuditOpen] = useState(false);
+  /** 运行统计概览：汇总 + 工具排行 + 按天分布 */
+  const [stats, setStats] = useState<RunStats | null>(null);
+  const [statsOpen, setStatsOpen] = useState(false);
   /** 浏览器通知开关（任务完成时提醒） */
   const [notifyOn, setNotifyOn] = useState(false);
   /** 工作区文件浏览器 */
@@ -653,6 +675,17 @@ export function ChatPanel() {
     }
   }, []);
 
+  /** 拉取运行统计概览 */
+  const refreshStats = useCallback(async () => {
+    try {
+      const r = await fetch("/api/stats");
+      const data = await r.json();
+      if (data?.stats) setStats(data.stats);
+    } catch {
+      /* 静默 */
+    }
+  }, []);
+
   /** 删除单条情景记忆 */
   const removeMemory = useCallback(
     async (id: number) => {
@@ -826,6 +859,10 @@ export function ChatPanel() {
   useEffect(() => {
     refreshAudits();
   }, [refreshAudits]);
+  // 初始拉取运行统计
+  useEffect(() => {
+    refreshStats();
+  }, [refreshStats]);
   // 初始加载工作区根目录
   useEffect(() => {
     loadDir("");
@@ -1093,9 +1130,10 @@ export function ChatPanel() {
         refreshSessions();
         refreshMemory();
         refreshRunLogs();
+        refreshStats();
       }
     },
-    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, sessions, notifyCompletion],
+    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion],
   );
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
@@ -1927,12 +1965,19 @@ export function ChatPanel() {
                 </div>
               </div>
             )}
-            {messages.map((m, i) => {
-              const prev = messages[i - 1];
-              const next = messages[i + 1];
-              // iMessage 气泡分组：连续同角色消息合并，仅组尾显示尾巴与头像
-              const groupEnd = !next || next.role !== m.role;
-              const groupMid = !!prev && prev.role === m.role && !!next && next.role === m.role;
+            {/* 本轮最后一条用户消息之后内联展示工具执行（实时） */}
+            {(() => {
+              let lastUserIndex = -1;
+              for (let i = 0; i < messages.length; i++) {
+                if (messages[i].role === "user") lastUserIndex = i;
+              }
+              const inlineVisible = cards.length > 0 && lastUserIndex >= 0;
+              return messages.map((m, i) => {
+                const prev = messages[i - 1];
+                const next = messages[i + 1];
+                // iMessage 气泡分组：连续同角色消息合并，仅组尾显示尾巴与头像
+                const groupEnd = !next || next.role !== m.role;
+                const groupMid = !!prev && prev.role === m.role && !!next && next.role === m.role;
               const longMsg = m.text.length > LONG_MSG_THRESHOLD;
               const msgCollapsed = longMsg && !longOpen.has(i);
               const cls = [
@@ -1945,21 +1990,21 @@ export function ChatPanel() {
                 .filter(Boolean)
                 .join(" ");
               return (
-                <div
-                  key={i}
-                  className={cls}
-                  onClick={(e) => {
-                    if (!msgSelectMode) return;
-                    const t = e.target as HTMLElement;
-                    if (t.closest("button, input, a, pre, code, .md")) return;
-                    setMsgSelected((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(i)) next.delete(i);
-                      else next.add(i);
-                      return next;
-                    });
-                  }}
-                >
+                <Fragment key={i}>
+                  <div
+                    className={cls}
+                    onClick={(e) => {
+                      if (!msgSelectMode) return;
+                      const t = e.target as HTMLElement;
+                      if (t.closest("button, input, a, pre, code, .md")) return;
+                      setMsgSelected((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(i)) next.delete(i);
+                        else next.add(i);
+                        return next;
+                      });
+                    }}
+                  >
                   {msgSelectMode && (
                     <span
                       className={`msg-check ${msgSelected.has(i) ? "msg-check-on" : ""}`}
@@ -2062,9 +2107,53 @@ export function ChatPanel() {
                       </div>
                     )}
                   </div>
-                </div>
+                  </div>
+                  {inlineVisible && i === lastUserIndex && (
+                    <div className="inline-tools">
+                      {cards.map((card) => (
+                        <div
+                          key={card.id}
+                          className={`card card-${card.status} ${card.status === "running" ? "card-indeterminate" : ""}`}
+                        >
+                          <div className="card-head">
+                            <span className={`card-badge card-badge-${card.status}`}>
+                              {TOOL_META[card.toolName]?.type ?? "工具"}
+                            </span>
+                            <span className="card-status" aria-hidden="true" />
+                            <span className="card-name">
+                              {TOOL_META[card.toolName]?.label ?? card.toolName}
+                            </span>
+                            <span className="card-state">
+                              {card.status === "running"
+                                ? "运行中"
+                                : `${card.status === "done" ? "完成" : "失败"}${card.elapsedMs != null ? ` · ${formatDuration(card.elapsedMs)}` : ""}`}
+                            </span>
+                          </div>
+                          <code className="card-args">
+                            {JSON.stringify(card.args)?.slice(0, 120)}
+                          </code>
+                          {card.result && (
+                            <>
+                              <button
+                                type="button"
+                                className={`card-expand ${expandedCards.has(card.id) ? "card-expand-open" : ""}`}
+                                onClick={() => toggleCard(card.id)}
+                              >
+                                {expandedCards.has(card.id) ? "收起结果" : "查看结果"}
+                              </button>
+                              {expandedCards.has(card.id) && (
+                                <pre className="card-result">{card.result}</pre>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Fragment>
               );
-            })}
+            });
+            })()}
             {info && <div className="info-banner">{info}</div>}
             {error && <div className="error-banner">{error}</div>}
           </div>
@@ -2329,6 +2418,89 @@ export function ChatPanel() {
                 }}
               >
                 {logsOpen ? "收起日志" : "查看日志"}
+              </button>
+            </div>
+            <div className="stats-section">
+              <div className="panel-title stats-head">
+                <h2>运行统计</h2>
+                <span className="panel-count">{stats?.totalRuns ?? 0}</span>
+              </div>
+              {statsOpen && stats && (
+                <div className="stats-body">
+                  <div className="stats-grid">
+                    <div className="stats-cell">
+                      <span className="stats-num">{stats.totalRuns}</span>
+                      <span className="stats-label">总运行</span>
+                    </div>
+                    <div className="stats-cell">
+                      <span className="stats-num stats-ok">
+                        {Math.round(stats.successRate * 100)}%
+                      </span>
+                      <span className="stats-label">成功率</span>
+                    </div>
+                    <div className="stats-cell">
+                      <span className="stats-num">{formatDuration(stats.totalDurationMs)}</span>
+                      <span className="stats-label">总耗时</span>
+                    </div>
+                    <div className="stats-cell">
+                      <span className="stats-num">
+                        {stats.avgDurationMs ? formatDuration(stats.avgDurationMs) : "—"}
+                      </span>
+                      <span className="stats-label">平均耗时</span>
+                    </div>
+                  </div>
+                  <div className="stats-sub-title">最近 7 天运行</div>
+                  <div className="stats-days">
+                    {stats.byDay.map((d) => {
+                      const max = Math.max(...stats.byDay.map((x) => x.runs), 1);
+                      return (
+                        <div key={d.day} className="stats-day" title={`${d.day}：${d.runs} 次`}>
+                          <div className="stats-day-bar-wrap">
+                            <div
+                              className="stats-day-bar"
+                              style={{ height: `${Math.max((d.runs / max) * 100, d.runs > 0 ? 8 : 2)}%` }}
+                            />
+                          </div>
+                          <span className="stats-day-label">{d.day.slice(3)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="stats-sub-title">工具使用排行</div>
+                  {stats.toolRanking.length === 0 ? (
+                    <p className="stats-empty">暂无工具调用</p>
+                  ) : (
+                    <div className="stats-tools">
+                      {stats.toolRanking.slice(0, 6).map((t) => {
+                        const max = stats.toolRanking[0]?.count ?? 1;
+                        return (
+                          <div key={t.name} className="stats-tool">
+                            <span className="stats-tool-name">
+                              {TOOL_META[t.name]?.label ?? t.name}
+                            </span>
+                            <div className="stats-tool-bar-wrap">
+                              <div
+                                className="stats-tool-bar"
+                                style={{ width: `${(t.count / max) * 100}%` }}
+                              />
+                            </div>
+                            <span className="stats-tool-count">{t.count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              <button
+                type="button"
+                className="stats-toggle"
+                onClick={() => {
+                  setStatsOpen((v) => !v);
+                  if (!statsOpen) refreshStats();
+                }}
+              >
+                {statsOpen ? "收起统计" : "查看统计"}
               </button>
             </div>
             <div className="audit-section">

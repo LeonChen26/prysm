@@ -134,6 +134,8 @@ export interface RunLogEntry {
   messageCount: number;
   stopped: boolean;
   error?: string;
+  /** 本轮各工具调用次数（供运行统计） */
+  toolCalls?: Record<string, number>;
 }
 
 const runLogs: RunLogEntry[] = [];

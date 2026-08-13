@@ -125,9 +125,15 @@ export async function POST(req: Request) {
       // 首个事件：告知前端实际使用的会话
       send({ type: "session", sessionId: session.id, title: session.title });
 
+      // 本轮工具调用统计（供运行统计概览）
+      const toolCalls: Record<string, number> = {};
       const unsub = agent!.subscribe(async (event) => {
         const ui = mapEvent(event);
-        if (ui) send(ui);
+        if (!ui) return;
+        if (ui.type === "tool_end") {
+          toolCalls[ui.toolName] = (toolCalls[ui.toolName] ?? 0) + 1;
+        }
+        send(ui);
       });
       // 审批请求事件（来自 beforeToolCall）也推送到同一条 SSE 流
       const unsubApprovals = subscribeApprovals((req) =>
@@ -207,6 +213,7 @@ export async function POST(req: Request) {
           durationMs: Date.now() - runStartedAt,
           messageCount: msgs.length,
           stopped,
+          toolCalls,
           error:
             !aborted && runError
               ? runError instanceof Error
