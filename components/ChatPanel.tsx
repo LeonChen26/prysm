@@ -118,7 +118,39 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 应用主题到 <html> 并持久化（React 19 hydration 下 useState 惰性初始化不可靠，统一在 mount 后读取）
+  const applyTheme = useCallback((t: "light" | "dark") => {
+    document.documentElement.dataset.theme = t;
+    localStorage.setItem("wb-theme", t);
+  }, []);
+
+  useEffect(() => {
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem("wb-theme");
+    } catch {
+      /* 隐私模式等场景可能不可用 */
+    }
+    const init: "light" | "dark" =
+      saved === "light" || saved === "dark"
+        ? saved
+        : matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+    setTheme(init);
+    applyTheme(init);
+  }, [applyTheme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => {
+      const next = t === "dark" ? "light" : "dark";
+      applyTheme(next);
+      return next;
+    });
+  }, [applyTheme]);
 
   // 加载会话列表，并选中最近的会话
   useEffect(() => {
@@ -346,6 +378,41 @@ export function ChatPanel() {
           <span className="status-dot" />
           {busy ? "正在执行任务…" : "空闲"}
         </div>
+        <button
+          className="theme-toggle"
+          onClick={toggleTheme}
+          title={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"}
+          aria-label="切换主题"
+        >
+          {theme === "dark" ? (
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+          ) : (
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+            </svg>
+          )}
+        </button>
       </header>
 
       <main className="app-main">

@@ -24,14 +24,43 @@
   --glass-bg: rgba(255, 255, 255, 0.66);
   --glass-border: rgba(60, 60, 67, 0.12);
   --glass-blur: blur(24px) saturate(1.8);
+  --tl-dim: 1;
+  --bg-glow: rgba(10, 132, 255, 0.08);
 }
 
-:root[data-widget-theme="dark"] {
+/* 强制浅色（覆盖跟随系统的深色） */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* 强制深色 */
+:root[data-theme="dark"] {
   color-scheme: dark;
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-muted: #1c1c1e;
+  --surface-filled: #2c2c2e;
+  --text: #ffffff;
+  --text-secondary: #ebebf5;
+  --text-muted: #98989f;
+  --border: rgba(255, 255, 255, 0.18);
+  --brand: #0a84ff;
+  --brand-strong: #4da3ff;
+  --brand-soft: rgba(10, 132, 255, 0.22);
+  --success: #30d158;
+  --danger: #ff453a;
+  --warning: #ffd60a;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 18px 44px rgba(0, 0, 0, 0.5);
+  --glass-bg: rgba(28, 28, 30, 0.66);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --tl-dim: 0.72;
+  --bg-glow: rgba(10, 132, 255, 0.16);
 }
 
+/* 跟随系统深色 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #000000;
     --surface: #1c1c1e;
     --surface-muted: #1c1c1e;
@@ -49,6 +78,8 @@
     --shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 18px 44px rgba(0, 0, 0, 0.5);
     --glass-bg: rgba(28, 28, 30, 0.66);
     --glass-border: rgba(255, 255, 255, 0.1);
+    --tl-dim: 0.72;
+    --bg-glow: rgba(10, 132, 255, 0.16);
   }
 }
 
@@ -65,7 +96,7 @@ body {
 
 body {
   background:
-    radial-gradient(1000px 520px at 14% -10%, rgba(10, 132, 255, 0.08), transparent 60%),
+    radial-gradient(1000px 520px at 14% -10%, var(--bg-glow), transparent 60%),
     var(--bg);
   background-attachment: fixed;
   color: var(--text);
@@ -119,6 +150,7 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 999px;
+  filter: brightness(var(--tl-dim));
   transition: filter 0.15s ease;
 }
 
@@ -194,6 +226,29 @@ body {
   background: var(--warning);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 18%, transparent);
   animation: pulse 1.2s ease-in-out infinite;
+}
+
+.theme-toggle {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(120, 120, 128, 0.14);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.theme-toggle:hover {
+  background: rgba(120, 120, 128, 0.24);
+}
+
+.theme-toggle:active {
+  transform: scale(0.92);
 }
 
 @keyframes pulse {
