@@ -151,6 +151,9 @@ export async function getAgent(sessionId: string): Promise<Agent> {
       messages,
     },
     streamFn: m.streamSimple.bind(m),
+    // 阶段 9：并行工具执行（单条消息含多个工具调用时同时执行；可用 TOOL_EXECUTION=sequential 回退）
+    toolExecution:
+      process.env.TOOL_EXECUTION === "sequential" ? "sequential" : "parallel",
     // 阶段 2+4：上下文压缩 + 情景记忆检索注入
     transformContext: buildContext,
     // 阶段 3+6：审批流 —— 敏感工具先征求用户确认（命中白名单规则则自动放行）
