@@ -209,6 +209,8 @@ export type UiEvent =
       id: string;
       toolName: string;
       isError: boolean;
+      /** 工具返回的文本内容（截断到 2000 字符），供前端展开查看 */
+      result?: string;
       todos?: { id: string; title: string; status: string; detail?: string }[];
     }
   | { type: "turn_end" }
@@ -229,17 +231,27 @@ export function mapEvent(event: AgentEvent): UiEvent | null {
         args: event.args,
       };
     case "tool_execution_end": {
-      const ui: UiEvent = {
+      const ui: Extract<UiEvent, { type: "tool_end" }> = {
         type: "tool_end",
         id: event.toolCallId,
         toolName: event.toolName,
         isError: event.isError,
       };
+      // 透传工具返回的文本内容（前端卡片可展开查看）
+      const raw = event.result as
+        | { content?: { type?: string; text?: string }[] }
+        | undefined;
+      const texts = (raw?.content ?? [])
+        .filter((c) => c.type === "text" && typeof c.text === "string")
+        .map((c) => c.text as string);
+      if (texts.length > 0) {
+        ui.result = texts.join("\n").slice(0, 2000);
+      }
       // 透传 todo 工具的任务清单，供前端渲染步骤卡片
       const todos = (event.result as { details?: { todos?: unknown } } | undefined)
         ?.details?.todos;
       if (Array.isArray(todos)) {
-        ui.todos = todos as UiEvent["todos"];
+        ui.todos = todos as Extract<UiEvent, { type: "tool_end" }>["todos"];
       }
       return ui;
     }

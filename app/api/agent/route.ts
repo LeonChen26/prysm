@@ -63,7 +63,7 @@ export async function GET(req: Request) {
 
 /** POST /api/agent —— 发送消息，返回 SSE 事件流 */
 export async function POST(req: Request) {
-  let body: { message?: unknown; sessionId?: unknown };
+  let body: { message?: unknown; sessionId?: unknown; rewindToText?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -87,6 +87,19 @@ export async function POST(req: Request) {
 
   if (agent.state.isStreaming) {
     return Response.json({ error: "agent 正在处理上一条消息，请稍候" }, { status: 409 });
+  }
+
+  // 重新生成：回退会话历史到指定用户消息（含该条），随后用相同消息重新执行
+  if (typeof body.rewindToText === "string" && body.rewindToText.trim()) {
+    const t = body.rewindToText.trim();
+    const msgs = agent.state.messages;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === "user" && contentText(m.content).trim() === t) {
+        agent.state.messages = msgs.slice(0, i + 1);
+        break;
+      }
+    }
   }
 
   const encoder = new TextEncoder();

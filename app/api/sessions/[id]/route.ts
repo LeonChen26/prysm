@@ -1,7 +1,7 @@
 import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { getAgent } from "@/lib/agent";
-import { deleteSession, getSession } from "@/lib/session";
+import { deleteSession, getSession, renameSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +32,35 @@ export async function GET(
       .map(toUiMessage)
       .filter((m): m is NonNullable<typeof m> => m !== null);
     return Response.json({ session, messages });
+  } catch (err) {
+    return Response.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
+  }
+}
+
+/** PATCH /api/sessions/:id —— 重命名会话 */
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const session = getSession(id);
+    if (!session) {
+      return Response.json({ error: "会话不存在" }, { status: 404 });
+    }
+    const body = await req.json().catch(() => null);
+    const title = String(body?.title ?? "").trim();
+    if (!title) {
+      return Response.json({ error: "title 不能为空" }, { status: 400 });
+    }
+    renameSession(id, title);
+    return Response.json({
+      ok: true,
+      session: { ...session, title },
+    });
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : String(err) },

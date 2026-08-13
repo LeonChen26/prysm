@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -14,6 +20,7 @@ interface ToolCard {
   toolName: string;
   args: unknown;
   status: "running" | "done" | "error";
+  result?: string;
 }
 
 interface TodoItem {
@@ -54,6 +61,7 @@ interface SseEvent {
   toolName?: string;
   args?: unknown;
   isError?: boolean;
+  result?: string;
   todos?: TodoItem[];
   sessionId?: string;
   title?: string;
@@ -108,6 +116,30 @@ const TODO_STATUS_LABELS: Record<TodoItem["status"], string> = {
   cancelled: "已取消",
 };
 
+/** 空状态快捷任务入口 */
+const QUICK_TASKS = [
+  "搜索 DeepSeek 最新模型并给出对比",
+  "整理 agent-workdir 里的项目并生成 README",
+  "写一份 Next.js 服务端组件的介绍",
+];
+
+/** 会话分组：今天 / 昨天 / 7天内 / 更早（基于 updatedAt） */
+function groupOf(ts: number): string {
+  if (!ts) return "更早";
+  const now = new Date();
+  const startToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  if (ts >= startToday) return "今天";
+  if (ts >= startToday - 86400_000) return "昨天";
+  if (ts >= startToday - 7 * 86400_000) return "7天内";
+  return "更早";
+}
+
+const GROUP_ORDER = ["今天", "昨天", "7天内", "更早"];
+
 /** 会话相对时间：刚刚 / x分钟前 / x小时前 / x天前 / 日期 */
 function formatRelTime(ts: number): string {
   if (!ts) return "";
@@ -159,7 +191,17 @@ export function ChatPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [sessionQuery, setSessionQuery] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  /** busy 的同步镜像，避免 useCallback 闭包读到过期值 */
+  const busyRef = useRef(false);
+  /** 智能滚动：用户停留在底部时才自动跟随；主动滚动离开底部则暂停 */
+  const stickRef = useRef(true);
+  /** 最近一次程序性滚动的时间戳（用于忽略其引发的 scroll 事件） */
+  const programmaticScrollRef = useRef(0);
 
   // 应用主题到 <html> 并持久化（React 19 hydration 下 useState 惰性初始化不可靠，统一在 mount 后读取）
   const applyTheme = useCallback((t: "light" | "dark") => {
@@ -278,98 +320,260 @@ export function ChatPanel() {
     [sessions, sessionId, switchSession],
   );
 
-  // 消息 / 卡片变化时自动滚动到底部
+  /** 拉取最新会话列表（发送后刷新标题与时间） */
+  const refreshSessions = useCallback(async () => {
+    try {
+      const r = await fetch("/api/sessions");
+      const data = await r.json();
+      if (Array.isArray(data?.sessions)) setSessions(data.sessions);
+    } catch {
+      /* 静默 */
+    }
+  }, []);
+
+  /** 智能滚动：记录用户是否停留在底部 */
+  const onChatScroll = useCallback(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    // 程序性自动滚动（smooth 动画）期间会连续触发 scroll 事件，
+    // 若不忽略会把 stickRef 误判为 false，导致自动跟随被意外关闭
+    if (Date.now() - programmaticScrollRef.current < 600) return;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  }, []);
+
+  // 消息 / 卡片变化时：仅当用户停留在底部才自动滚动跟随
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const el = chatScrollRef.current;
+    if (el && stickRef.current) {
+      programmaticScrollRef.current = Date.now();
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
   }, [messages, cards, todos, busy]);
 
+  /**
+   * 核心：向 agent 发送消息并消费 SSE 流。
+   * @param text         用户消息内容
+   * @param rewindToText 重新生成时回退到该用户消息（后端按文本截断历史）
+   * @param appendUser   是否追加 user 消息（重新生成时历史已含该消息，跳过）
+   */
+  const streamReply = useCallback(
+    async (text: string, rewindToText?: string, appendUser = true) => {
+      const t = text.trim();
+      if (!t || busyRef.current) return;
+      setError(null);
+      setCards([]);
+      setTodos([]);
+      setApprovals([]);
+      if (appendUser) {
+        setMessages((m) => [
+          ...m,
+          { role: "user", text: t },
+          { role: "assistant", text: "" },
+        ]);
+      } else {
+        setMessages((m) => [...m, { role: "assistant", text: "" }]);
+      }
+      setBusy(true);
+      busyRef.current = true;
+      stickRef.current = true;
+
+      try {
+        const res = await fetch("/api/agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: t, sessionId, rewindToText }),
+        });
+        if (!res.ok || !res.body) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error ?? `请求失败: ${res.status}`);
+        }
+        await readSSE(res, (ev) => {
+          switch (ev.type) {
+            case "session":
+              // 服务端确认/分配的会话（未指定时取最新或新建）
+              if (ev.sessionId) {
+                setSessionId(ev.sessionId);
+                setSessions((list) => {
+                  const exists = list.some((s) => s.id === ev.sessionId);
+                  return exists
+                    ? list
+                    : [
+                        {
+                          id: ev.sessionId!,
+                          title: ev.title ?? "新会话",
+                          createdAt: 0,
+                          updatedAt: 0,
+                        },
+                        ...list,
+                      ];
+                });
+              }
+              break;
+            case "delta":
+              setMessages((m) => {
+                const copy = [...m];
+                const last = copy[copy.length - 1];
+                if (last?.role === "assistant") {
+                  copy[copy.length - 1] = {
+                    ...last,
+                    text: last.text + (ev.delta ?? ""),
+                  };
+                }
+                return copy;
+              });
+              break;
+            case "tool_start":
+              setCards((c) => [
+                ...c,
+                {
+                  id: ev.id!,
+                  toolName: ev.toolName!,
+                  args: ev.args,
+                  status: "running",
+                },
+              ]);
+              break;
+            case "tool_end":
+              setCards((c) =>
+                c.map((card) =>
+                  card.id === ev.id
+                    ? {
+                        ...card,
+                        status: ev.isError ? "error" : "done",
+                        result: ev.result,
+                      }
+                    : card,
+                ),
+              );
+              if (ev.todos) setTodos(ev.todos);
+              break;
+            case "approval_required":
+              setApprovals((a) => [
+                ...a,
+                { id: ev.id!, toolName: ev.toolName!, args: ev.args },
+              ]);
+              break;
+            case "stopped":
+              setError(ev.message ?? "任务已停止");
+              break;
+            case "error":
+              setError(ev.message ?? "发生错误");
+              break;
+          }
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+        busyRef.current = false;
+        refreshSessions();
+      }
+    },
+    [sessionId, refreshSessions],
+  );
+
+  /** 发送输入框内容 */
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text) return;
     setInput("");
-    setError(null);
-    setMessages((m) => [...m, { role: "user", text }]);
-    setMessages((m) => [...m, { role: "assistant", text: "" }]);
-    setBusy(true);
+    await streamReply(text);
+  }, [input, streamReply]);
 
-    try {
-      const res = await fetch("/api/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId }),
-      });
-      if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error ?? `请求失败: ${res.status}`);
-      }
-      await readSSE(res, (ev) => {
-        switch (ev.type) {
-          case "session":
-            // 服务端确认/分配的会话（未指定时取最新或新建）
-            if (ev.sessionId) {
-              setSessionId(ev.sessionId);
-              setSessions((list) => {
-                const exists = list.some((s) => s.id === ev.sessionId);
-                return exists
-                  ? list
-                  : [{ id: ev.sessionId!, title: ev.title ?? "新会话", createdAt: 0, updatedAt: 0 }, ...list];
-              });
-            }
-            break;
-          case "delta":
-            setMessages((m) => {
-              const copy = [...m];
-              const last = copy[copy.length - 1];
-              if (last?.role === "assistant") {
-                copy[copy.length - 1] = {
-                  ...last,
-                  text: last.text + (ev.delta ?? ""),
-                };
-              }
-              return copy;
-            });
-            break;
-          case "tool_start":
-            setCards((c) => [
-              ...c,
-              {
-                id: ev.id!,
-                toolName: ev.toolName!,
-                args: ev.args,
-                status: "running",
-              },
-            ]);
-            break;
-          case "tool_end":
-            setCards((c) =>
-              c.map((card) =>
-                card.id === ev.id
-                  ? { ...card, status: ev.isError ? "error" : "done" }
-                  : card,
-              ),
-            );
-            if (ev.todos) setTodos(ev.todos);
-            break;
-          case "approval_required":
-            setApprovals((a) => [
-              ...a,
-              { id: ev.id!, toolName: ev.toolName!, args: ev.args },
-            ]);
-            break;
-          case "stopped":
-            setError(ev.message ?? "任务已停止");
-            break;
-          case "error":
-            setError(ev.message ?? "发生错误");
-            break;
+  /** 快捷任务入口 */
+  const sendQuick = useCallback(
+    async (preset: string) => {
+      setInput("");
+      await streamReply(preset);
+    },
+    [streamReply],
+  );
+
+  /** 重新生成：截断到该条回复之前的用户消息，回退历史并重新执行 */
+  const regenerate = useCallback(
+    async (msgIndex: number) => {
+      const target = messages[msgIndex];
+      if (!target || target.role !== "assistant" || busyRef.current) return;
+      let uIdx = -1;
+      for (let i = msgIndex - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+          uIdx = i;
+          break;
         }
+      }
+      if (uIdx < 0) return;
+      const userText = messages[uIdx].text;
+      setMessages(messages.slice(0, uIdx + 1));
+      await streamReply(userText, userText, false);
+    },
+    [messages, streamReply],
+  );
+
+  /** 复制单条消息全文 */
+  const copyMessage = useCallback(
+    async (text: string, e: ReactMouseEvent<HTMLButtonElement>) => {
+      if (!text) return;
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        // 剪贴板 API 不可用时回退到 execCommand
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          ok = document.execCommand("copy");
+          document.body.removeChild(ta);
+        } catch {
+          ok = false;
+        }
+      }
+      if (!ok) return;
+      const btn = e.currentTarget;
+      btn.textContent = "已复制";
+      btn.classList.add("msg-action-copied");
+      setTimeout(() => {
+        btn.textContent = "复制";
+        btn.classList.remove("msg-action-copied");
+      }, 1200);
+    },
+    [],
+  );
+
+  /** 保存会话重命名 */
+  const saveRename = useCallback(async () => {
+    if (!renamingId) return;
+    const title = renameValue.trim();
+    const id = renamingId;
+    setRenamingId(null);
+    if (!title) return;
+    try {
+      const res = await fetch(`/api/sessions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? "重命名失败");
+      }
+      setSessions((list) =>
+        list.map((s) => (s.id === id ? { ...s, title } : s)),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
     }
-  }, [input, busy, sessionId]);
+  }, [renamingId, renameValue]);
+
+  /** 进入会话重命名编辑态 */
+  const startRename = useCallback((id: string, title: string) => {
+    setRenamingId(id);
+    setRenameValue(title);
+  }, []);
 
   const decideApproval = useCallback(async (id: string, approve: boolean) => {
     setApprovals((a) => a.filter((item) => item.id !== id));
@@ -401,6 +605,22 @@ export function ChatPanel() {
       /* SSE 流会自行结束 */
     }
   }, [sessionId]);
+
+  // 任务进度（供进度条渲染）
+  const doneCount = todos.filter((t) => t.status === "completed").length;
+  const todoPct = todos.length
+    ? Math.round((doneCount / todos.length) * 100)
+    : 0;
+
+  /** 展开 / 收起工具卡片的结果 */
+  const toggleCard = useCallback((id: string) => {
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   return (
     <div className="app">
@@ -468,44 +688,110 @@ export function ChatPanel() {
               ＋
             </button>
           </div>
+          <div className="session-search">
+            <input
+              value={sessionQuery}
+              onChange={(e) => setSessionQuery(e.target.value)}
+              placeholder="搜索会话…"
+            />
+          </div>
           <div className="session-scroll">
             {sessions.length === 0 ? (
               <p className="session-empty">还没有会话</p>
             ) : (
-              <ul className="session-list">
-                {sessions.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      className={`session-item ${s.id === sessionId ? "session-active" : ""}`}
-                      onClick={() => switchSession(s.id)}
-                    >
-                      <span className="session-item-title">
-                        {s.title || "未命名会话"}
-                      </span>
-                      <span className="session-item-time">
-                        {formatRelTime(s.updatedAt)}
-                      </span>
-                      <span
-                        className="session-item-del"
-                        role="button"
-                        title="删除会话"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeSession(s.id);
-                        }}
-                      >
-                        ×
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              (() => {
+                const q = sessionQuery.trim().toLowerCase();
+                const filtered = q
+                  ? sessions.filter((s) =>
+                      (s.title || "").toLowerCase().includes(q),
+                    )
+                  : sessions;
+                if (filtered.length === 0) {
+                  return <p className="session-empty">没有匹配的会话</p>;
+                }
+                const groups = GROUP_ORDER.map((key) => ({
+                  key,
+                  items: filtered.filter(
+                    (s) => groupOf(s.updatedAt) === key,
+                  ),
+                })).filter((g) => g.items.length > 0);
+                return (
+                  <>
+                    {groups.map((g) => (
+                      <div key={g.key} className="session-group">
+                        <p className="session-group-label">{g.key}</p>
+                        <ul className="session-list">
+                          {g.items.map((s) => (
+                            <li key={s.id}>
+                              {renamingId === s.id ? (
+                                <input
+                                  className="session-rename-input"
+                                  value={renameValue}
+                                  autoFocus
+                                  onChange={(e) => setRenameValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") saveRename();
+                                    if (e.key === "Escape")
+                                      setRenamingId(null);
+                                  }}
+                                  onBlur={saveRename}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              ) : (
+                                <button
+                                  className={`session-item ${s.id === sessionId ? "session-active" : ""}`}
+                                  onClick={() => switchSession(s.id)}
+                                >
+                                  <span className="session-item-title">
+                                    {s.title || "未命名会话"}
+                                  </span>
+                                  <span className="session-item-time">
+                                    {formatRelTime(s.updatedAt)}
+                                  </span>
+                                  <span className="session-item-actions">
+                                    <span
+                                      className="session-item-act"
+                                      role="button"
+                                      title="重命名会话"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        startRename(s.id, s.title || "");
+                                      }}
+                                    >
+                                      ✎
+                                    </span>
+                                    <span
+                                      className="session-item-act session-item-del"
+                                      role="button"
+                                      title="删除会话"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeSession(s.id);
+                                      }}
+                                    >
+                                      ×
+                                    </span>
+                                  </span>
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()
             )}
           </div>
         </aside>
 
         <section className="chat">
-          <div className="chat-scroll">
+          <div
+            className="chat-scroll"
+            ref={chatScrollRef}
+            onScroll={onChatScroll}
+          >
             {messages.length === 0 && (
               <div className="empty">
                 <div className="empty-icon" aria-hidden="true">
@@ -527,6 +813,19 @@ export function ChatPanel() {
                 <p className="empty-sub">
                   例如：搜索 DeepSeek 最新模型，或在 agent-workdir 里整理一个项目的 README
                 </p>
+                <div className="quick-chips">
+                  {QUICK_TASKS.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      className="quick-chip"
+                      disabled={busy}
+                      onClick={() => sendQuick(q)}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {messages.map((m, i) => {
@@ -562,15 +861,40 @@ export function ChatPanel() {
                           {m.text}
                         </ReactMarkdown>
                       </div>
+                    ) : busy && i === messages.length - 1 ? (
+                      <span className="thinking" aria-label="思考中">
+                        <span className="thinking-dot" />
+                        <span className="thinking-dot" />
+                        <span className="thinking-dot" />
+                      </span>
                     ) : (
                       <span className="cursor-blink" />
+                    )}
+                    {groupEnd && m.text && (
+                      <div className="msg-actions">
+                        <button
+                          type="button"
+                          className="msg-action"
+                          onClick={(e) => copyMessage(m.text, e)}
+                        >
+                          复制
+                        </button>
+                        {m.role === "assistant" && (
+                          <button
+                            type="button"
+                            className="msg-action"
+                            onClick={() => regenerate(i)}
+                          >
+                            重新生成
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
               );
             })}
             {error && <div className="error-banner">{error}</div>}
-            <div ref={scrollRef} />
           </div>
 
           <form
@@ -665,11 +989,17 @@ export function ChatPanel() {
                 <div className="panel-title">
                   <h2>任务计划</h2>
                   <span className="panel-count">
-                    {
-                      todos.filter((t) => t.status === "completed").length
-                    }
-                    /{todos.length}
+                    {doneCount}/{todos.length}
                   </span>
+                </div>
+                <div className="todo-progress">
+                  <div className="todo-progress-track">
+                    <div
+                      className="todo-progress-fill"
+                      style={{ width: `${todoPct}%` }}
+                    />
+                  </div>
+                  <span className="todo-progress-label">{todoPct}%</span>
                 </div>
                 <ol className="todo-list">
                   {todos.map((t) => (
@@ -721,6 +1051,20 @@ export function ChatPanel() {
                     <code className="card-args">
                       {JSON.stringify(card.args)?.slice(0, 120)}
                     </code>
+                    {card.result && (
+                      <>
+                        <button
+                          type="button"
+                          className={`card-expand ${expandedCards.has(card.id) ? "card-expand-open" : ""}`}
+                          onClick={() => toggleCard(card.id)}
+                        >
+                          {expandedCards.has(card.id) ? "收起结果" : "查看结果"}
+                        </button>
+                        {expandedCards.has(card.id) && (
+                          <pre className="card-result">{card.result}</pre>
+                        )}
+                      </>
+                    )}
                   </li>
                 ))}
               </ul>

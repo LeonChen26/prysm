@@ -34,7 +34,10 @@ function snapshot(): TodoItem[] {
 export function formatTodos(list: TodoItem[]): string {
   if (list.length === 0) return "(暂无任务)";
   return list
-    .map((t) => `[${t.status}] ${t.title}${t.detail ? ` — ${t.detail}` : ""}`)
+    .map(
+      (t) =>
+        `[${t.id}] [${t.status}] ${t.title}${t.detail ? ` — ${t.detail}` : ""}`,
+    )
     .join("\n");
 }
 
