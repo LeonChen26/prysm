@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { messageText } from "./messages";
 
 /**
  * 情景记忆（阶段 4）
@@ -64,22 +65,6 @@ function queryTokens(query: string, topN = 8): string[] {
     .filter(Boolean)
     .filter((t) => !STOPWORDS.has(t))
     .slice(0, topN);
-}
-
-/** 提取消息纯文本 */
-function messageText(m: AgentMessage): string {
-  // AgentMessage 联合包含 bashExecution 等无 content 的消息类型
-  if (!("content" in m) || m.content == null) return "";
-  const content = m.content;
-  if (typeof content === "string") return content;
-  return content
-    .map((b) => {
-      if (b.type === "text") return b.text;
-      if (b.type === "toolCall") return `[调用工具 ${b.name} 参数 ${JSON.stringify(b.arguments)}]`;
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
 }
 
 /** 批量写入 episode（按 role+content 去重），返回新增条数 */

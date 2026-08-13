@@ -9,7 +9,8 @@
 process.env.MAX_CONTEXT_TOKENS = "100";
 process.env.KEEP_RECENT_MESSAGES = "2";
 
-const { estimateTokens, messageText, transformContext } = await import("./lib/context");
+const { estimateTokens, transformContext } = await import("./lib/context");
+const { messageText } = await import("./lib/messages");
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);

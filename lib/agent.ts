@@ -1,7 +1,8 @@
 import { Agent, type AgentEvent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import { contentText, createModels } from "@earendil-works/pi-ai";
 import { requestApproval } from "./approval";
-import { messageText, transformContext } from "./context";
+import { messageText } from "./messages";
+import { transformContext } from "./context";
 import { MEMORY_RECALL_K, resetMemoryTracking, retrieveEpisodes } from "./memory";
 import { isAutoApproved } from "./policy";
 import { getSessionMessages } from "./session";

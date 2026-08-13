@@ -2,14 +2,11 @@
 
 import {
   Fragment,
-  isValidElement,
   useCallback,
   useEffect,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
-  type ReactElement,
-  type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -17,45 +14,31 @@ import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import { mdToPlainText } from "@/lib/plaintext";
-
-/** 工作区文件浏览器图标（SVG，随主题着色） */
-const WbFolderIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
-  </svg>
-);
-const WbFileIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
-    <path d="M14 3v5h5" />
-  </svg>
-);
-const WbChevron = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M9 6l6 6-6 6" />
-  </svg>
-);
+import { TOOL_META } from "@/lib/tool-meta";
+import {
+  CodeBlock,
+  extractFileRefs,
+  FileRefCards,
+  WbChevron,
+  WbFileIcon,
+  WbFolderIcon,
+} from "./chat-blocks";
+import {
+  formatDuration,
+  formatGroupLabel,
+  formatMsgTime,
+  formatRelTime,
+  GROUP_ORDER,
+  readSSE,
+  TODO_STATUS_LABELS,
+  type ApprovalCard,
+  type RunStats,
+  type SessionInfo,
+  type SseEvent,
+  type TodoItem,
+  type ToolCard,
+  type UiMessage,
+} from "./chat-types";
 
 /** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
 const markdownComponents = {
@@ -73,141 +56,6 @@ const markdownComponents = {
   ),
 };
 
-interface UiMessage {
-  role: "user" | "assistant";
-  text: string;
-  /** 消息时间戳（毫秒），用于展示发送时间 */
-  timestamp?: number;
-}
-
-interface ToolCard {
-  id: string;
-  toolName: string;
-  args: unknown;
-  status: "running" | "done" | "error";
-  result?: string;
-  /** 工具开始时间戳（用于计算耗时） */
-  startedAt?: number;
-  /** 工具执行耗时（毫秒） */
-  elapsedMs?: number;
-}
-
-interface TodoItem {
-  id: string;
-  title: string;
-  status: "pending" | "in_progress" | "completed" | "cancelled";
-  detail?: string;
-}
-
-interface ApprovalCard {
-  id: string;
-  toolName: string;
-  args: unknown;
-}
-
-interface SessionInfo {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  pinned?: number;
-}
-
-interface SseEvent {
-  type:
-    | "session"
-    | "turn_start"
-    | "delta"
-    | "tool_start"
-    | "tool_end"
-    | "turn_end"
-    | "agent_end"
-    | "approval_required"
-    | "stopped"
-    | "error"
-    | "done";
-  delta?: string;
-  id?: string;
-  toolName?: string;
-  args?: unknown;
-  isError?: boolean;
-  result?: string;
-  todos?: TodoItem[];
-  sessionId?: string;
-  title?: string;
-  message?: string;
-}
-
-interface RunStats {
-  totalRuns: number;
-  okRuns: number;
-  failedRuns: number;
-  stoppedRuns: number;
-  successRate: number;
-  totalDurationMs: number;
-  avgDurationMs: number;
-  toolRanking: { name: string; count: number }[];
-  byDay: {
-    day: string;
-    runs: number;
-    okRuns: number;
-    failedRuns: number;
-    durationMs: number;
-  }[];
-}
-
-async function readSSE(response: Response, onEvent: (ev: SseEvent) => void) {
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const payload = trimmed.slice(5).trim();
-      if (!payload) continue;
-      try {
-        onEvent(JSON.parse(payload) as SseEvent);
-      } catch {
-        /* 忽略无法解析的事件 */
-      }
-    }
-  }
-}
-
-const TOOL_META: Record<string, { label: string; type: string }> = {
-  list_dir: { label: "列出目录", type: "文件" },
-  read_file: { label: "读取文件", type: "文件" },
-  write_file: { label: "写入文件", type: "文件" },
-  append_file: { label: "追加写入", type: "文件" },
-  create_dir: { label: "创建目录", type: "文件" },
-  move_file: { label: "移动/重命名", type: "文件" },
-  copy_file: { label: "复制文件", type: "文件" },
-  delete_file: { label: "删除文件", type: "文件" },
-  verify_file: { label: "校验文件", type: "文件" },
-  todo_create: { label: "创建任务计划", type: "任务" },
-  todo_modify: { label: "更新任务计划", type: "任务" },
-  todo_list: { label: "查看任务计划", type: "任务" },
-  web_search: { label: "网页搜索", type: "网络" },
-  fetch_url: { label: "抓取网页", type: "网络" },
-  search_files: { label: "搜索文件内容", type: "文件" },
-  run_bash: { label: "执行命令", type: "系统" },
-  env_info: { label: "环境信息", type: "系统" },
-  port_check: { label: "端口查询", type: "系统" },
-};
-
-const TODO_STATUS_LABELS: Record<TodoItem["status"], string> = {
-  pending: "待办",
-  in_progress: "进行中",
-  completed: "完成",
-  cancelled: "已取消",
-};
-
 /** 空状态快捷任务入口 */
 const QUICK_TASKS = [
   "搜索 DeepSeek 最新模型并给出对比",
@@ -217,212 +65,6 @@ const QUICK_TASKS = [
 
 /** 超过该字符数的消息默认折叠，点击展开 */
 const LONG_MSG_THRESHOLD = 4000;
-
-/** 会话分组：今天 / 昨天 / 7天内 / 更早（基于 updatedAt） */
-function groupOf(ts: number): string {
-  if (!ts) return "更早";
-  const now = new Date();
-  const startToday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  ).getTime();
-  if (ts >= startToday) return "今天";
-  if (ts >= startToday - 86400_000) return "昨天";
-  if (ts >= startToday - 7 * 86400_000) return "7天内";
-  return "更早";
-}
-
-const GROUP_ORDER = ["今天", "昨天", "7天内", "更早"];
-
-/** 会话相对时间：刚刚 / x分钟前 / x小时前 / x天前 / 日期 */
-function formatRelTime(ts: number): string {
-  if (!ts) return "";
-  const diff = Date.now() - ts;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`;
-  if (diff < 7 * 86400_000) return `${Math.floor(diff / 86400_000)} 天前`;
-  const d = new Date(ts);
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
-}
-
-/** 工具耗时：<1s 显示毫秒，否则保留一位小数秒 */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-/** 消息发送时间：HH:mm（跨天补日期） */
-function formatMsgTime(ts: number): string {
-  if (!ts) return "";
-  const d = new Date(ts);
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return sameDay ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
-}
-
-/** 思考块：默认折叠，点击展开（模型以 ```thinking 包裹的中间推理过程） */
-function ThinkingBlock({ children }: { children?: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className={`thinking-block ${open ? "thinking-block-open" : ""}`}>
-      <button
-        type="button"
-        className="thinking-block-toggle"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="thinking-block-icon" aria-hidden="true">
-          {open ? "▾" : "▸"}
-        </span>
-        {open ? "收起思考过程" : "查看思考过程"}
-      </button>
-      {open && <pre className="thinking-block-body">{children}</pre>}
-    </div>
-  );
-}
-
-/** 递归提取 React 节点文本（用于代码块语言内容） */
-function nodeToText(node: ReactNode): string {
-  if (node == null || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(nodeToText).join("");
-  if (isValidElement(node)) {
-    const props = (node as ReactElement<{ children?: ReactNode }>).props;
-    return nodeToText(props?.children);
-  }
-  return "";
-}
-
-/** 从消息文本中提取独立的 wb:// 文件引用行（跳过围栏代码块），并从正文移除 */
-function extractFileRefs(text: string): { cleaned: string; refs: { path: string }[] } {
-  const refs: { path: string }[] = [];
-  let inFence = false;
-  const cleaned = text
-    .split("\n")
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
-        return line;
-      }
-      if (inFence) return line;
-      const m = /^wb:\/\/(\S+)\s*$/.exec(line.trim());
-      if (m) {
-        refs.push({ path: m[1] });
-        return "";
-      }
-      return line;
-    })
-    .join("\n");
-  return { cleaned, refs };
-}
-
-/** Mermaid 流程图：客户端懒加载渲染 ```mermaid 代码块，跟随全局主题并在切换时自动重渲染 */
-function MermaidDiagram({ code }: { code: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
-  const [errText, setErrText] = useState("");
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  // 监听 html[data-theme] 变化（主题切换时触发重新渲染）
-  useEffect(() => {
-    const read = () =>
-      setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
-    read();
-    const observer = new MutationObserver(read);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-theme"],
-    });
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("loading");
-    (async () => {
-      try {
-        const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          theme: theme === "dark" ? "dark" : "default",
-        });
-        const id = `m-${Math.random().toString(36).slice(2, 10)}`;
-        const { svg } = await mermaid.render(id, code);
-        if (cancelled) return;
-        if (ref.current) ref.current.innerHTML = svg;
-        setStatus("done");
-      } catch (err) {
-        if (cancelled) return;
-        setStatus("error");
-        setErrText(err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [code, theme]);
-
-  if (status === "error") {
-    return (
-      <div className="mermaid-block mermaid-error">
-        <pre>{code}</pre>
-        <p className="mermaid-err">图表解析失败：{errText.slice(0, 140)}</p>
-      </div>
-    );
-  }
-  return (
-    <div className="mermaid-block">
-      {status === "loading" && <span className="mermaid-loading">渲染图表中…</span>}
-      <div ref={ref} className="mermaid-svg" />
-    </div>
-  );
-}
-
-/** Markdown 代码块：hover 显示复制按钮；```thinking 语言渲染为折叠的思考块；```mermaid 渲染流程图 */
-function CodeBlock({ children }: { children?: React.ReactNode }) {
-  const ref = useRef<HTMLPreElement>(null);
-  const [copied, setCopied] = useState(false);
-  // 检测语言标签：react-markdown 把 ```thinking 渲染为 code.language-thinking
-  const childProps = (
-    typeof children === "object" && children !== null
-      ? (children as React.ReactElement).props
-      : undefined
-  ) as { className?: string } | undefined;
-  const isThinking =
-    !!childProps && /language-thinking/i.test(String(childProps.className ?? ""));
-  if (isThinking) return <ThinkingBlock>{children}</ThinkingBlock>;
-  const isMermaid =
-    !!childProps && /language-mermaid/i.test(String(childProps.className ?? ""));
-  if (isMermaid) return <MermaidDiagram code={nodeToText(children)} />;
-  const copy = async () => {
-    if (!ref.current) return;
-    try {
-      await navigator.clipboard.writeText(ref.current.textContent ?? "");
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* 剪贴板不可用时静默 */
-    }
-  };
-  return (
-    <div className="code-block">
-      <button
-        type="button"
-        className={`code-copy ${copied ? "code-copied" : ""}`}
-        onClick={copy}
-      >
-        {copied ? "已复制" : "复制"}
-      </button>
-      <pre ref={ref}>{children}</pre>
-    </div>
-  );
-}
 
 export function ChatPanel() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -1149,14 +791,15 @@ export function ChatPanel() {
             case "session":
               // 服务端确认/分配的会话（未指定时取最新或新建）
               if (ev.sessionId) {
-                setSessionId(ev.sessionId);
+                const sid = ev.sessionId;
+                setSessionId(sid);
                 setSessions((list) => {
-                  const exists = list.some((s) => s.id === ev.sessionId);
+                  const exists = list.some((s) => s.id === sid);
                   return exists
                     ? list
                     : [
                         {
-                          id: ev.sessionId!,
+                          id: sid,
                           title: ev.title ?? "新会话",
                           createdAt: 0,
                           updatedAt: 0,
@@ -1179,18 +822,22 @@ export function ChatPanel() {
                 return copy;
               });
               break;
-            case "tool_start":
+            case "tool_start": {
+              const id = ev.id;
+              const toolName = ev.toolName;
+              if (!id || !toolName) break;
               setCards((c) => [
                 ...c,
                 {
-                  id: ev.id!,
-                  toolName: ev.toolName!,
+                  id,
+                  toolName,
                   args: ev.args,
                   status: "running",
                   startedAt: Date.now(),
                 },
               ]);
               break;
+            }
             case "tool_end":
               setCards((c) =>
                 c.map((card) => {
@@ -1206,12 +853,16 @@ export function ChatPanel() {
               );
               if (ev.todos) setTodos(ev.todos);
               break;
-            case "approval_required":
+            case "approval_required": {
+              const id = ev.id;
+              const toolName = ev.toolName;
+              if (!id || !toolName) break;
               setApprovals((a) => [
                 ...a,
-                { id: ev.id!, toolName: ev.toolName!, args: ev.args },
+                { id, toolName, args: ev.args },
               ]);
               break;
+            }
             case "stopped":
               setError(ev.message ?? "任务已停止");
               break;
@@ -1536,7 +1187,12 @@ export function ChatPanel() {
       ids.splice(from, 1);
       ids.splice(to, 0, fromId);
       const map = new Map(todos.map((t) => [t.id, t]));
-      setTodos(ids.map((id) => map.get(id)!).filter(Boolean));
+      setTodos(
+        ids.flatMap((id) => {
+          const t = map.get(id);
+          return t ? [t] : [];
+        }),
+      );
       try {
         const res = await fetch("/api/todos", {
           method: "POST",
@@ -1833,7 +1489,7 @@ export function ChatPanel() {
                 const groups = GROUP_ORDER.map((key) => ({
                   key,
                   items: filtered.filter(
-                    (s) => groupOf(s.updatedAt) === key,
+                    (s) => formatGroupLabel(s.updatedAt) === key,
                   ),
                 })).filter((g) => g.items.length > 0);
                 return (
@@ -2139,31 +1795,7 @@ export function ChatPanel() {
                     {m.text ? (
                       <>
                         {fileRefs.length > 0 && (
-                          <div className="fileref-cards">
-                            {fileRefs.map((r, ri) => (
-                              <button
-                                key={ri}
-                                type="button"
-                                className="fileref-card"
-                                title={`点击预览 ${r.path}`}
-                                onClick={() => openFile(r.path)}
-                              >
-                                <svg
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                  <path d="M14 2v6h6" />
-                                </svg>
-                                <span className="fileref-path">{r.path}</span>
-                                <span className="fileref-open">预览</span>
-                              </button>
-                            ))}
-                          </div>
+                          <FileRefCards refs={fileRefs} onOpen={openFile} />
                         )}
                         <div className="md">
                           <ReactMarkdown

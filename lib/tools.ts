@@ -6,6 +6,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
 import { fetchUrlAsText, webSearch } from "./web";
 import { AGENT_WORKDIR, ALLOWED_ROOTS, resolveInWorkdir } from "./paths";
+import { TOOL_META } from "./tool-meta";
 
 // re-export 兼容历史导入（测试脚本从 lib/tools 引入 AGENT_WORKDIR）
 export { AGENT_WORKDIR, ALLOWED_ROOTS } from "./paths";
@@ -176,7 +177,7 @@ interface ToolArgs {
 export const tools: AgentTool<any>[] = [
   {
     name: "list_dir",
-    label: "列出目录",
+    label: TOOL_META["list_dir"].label,
     description:
       "列出工作区（agent-workdir）内指定目录下的文件与子目录。dir 为空表示根目录。",
     parameters: Type.Object({
@@ -197,7 +198,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "read_file",
-    label: "读取文件",
+    label: TOOL_META["read_file"].label,
     description: "读取工作区内的文本文件内容，最大支持 100KB。",
     parameters: Type.Object({
       path: Type.String({ description: "相对文件路径" }),
@@ -218,7 +219,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "write_file",
-    label: "写入文件",
+    label: TOOL_META["write_file"].label,
     description: "在工作区写入或覆盖一个文本文件（自动创建父目录）。",
     parameters: Type.Object({
       path: Type.String({ description: "相对文件路径" }),
@@ -242,7 +243,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "append_file",
-    label: "追加写入",
+    label: TOOL_META["append_file"].label,
     description:
       "在文件末尾追加内容（文件不存在则创建）。用于增量记录、日志、续写等。",
     parameters: Type.Object({
@@ -267,7 +268,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "create_dir",
-    label: "创建目录",
+    label: TOOL_META["create_dir"].label,
     description: "在工作区创建目录（可一次创建多级，已存在则跳过）。",
     parameters: Type.Object({
       path: Type.String({ description: "相对目录路径" }),
@@ -284,7 +285,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "move_file",
-    label: "移动/重命名",
+    label: TOOL_META["move_file"].label,
     description: "移动或重命名工作区内的文件或目录（自动创建目标父目录）。",
     parameters: Type.Object({
       from: Type.String({ description: "源相对路径（文件或目录）" }),
@@ -306,7 +307,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "copy_file",
-    label: "复制文件",
+    label: TOOL_META["copy_file"].label,
     description: "在工作区内复制文件（自动创建目标父目录）。",
     parameters: Type.Object({
       from: Type.String({ description: "源相对文件路径" }),
@@ -328,7 +329,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "delete_file",
-    label: "删除文件",
+    label: TOOL_META["delete_file"].label,
     description: "删除工作区内的文件（不删除目录）。属于敏感操作，需要用户确认。",
     parameters: Type.Object({
       path: Type.String({ description: "相对文件路径" }),
@@ -406,7 +407,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "todo_create",
-    label: "创建任务计划",
+    label: TOOL_META["todo_create"].label,
     description:
       "把复杂任务拆解为可执行的子任务清单。会覆盖当前的任务计划。适用于多步骤任务开始前。",
     parameters: Type.Object({
@@ -517,7 +518,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "fetch_url",
-    label: "抓取网页",
+    label: TOOL_META["fetch_url"].label,
     description:
       "抓取指定网页内容并转为纯文本（自动提取标题，最大约 200KB）。用于阅读搜索结果中的文章、官方文档或新闻全文。",
     parameters: Type.Object({
@@ -537,7 +538,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "search_files",
-    label: "搜索文件内容",
+    label: TOOL_META["search_files"].label,
     description:
       "在工作区（agent-workdir）内递归搜索包含指定关键词的文件，返回文件名、行号与命中行。可选 pattern 过滤文件名（支持 * 通配，如 '*.md'）。用于定位代码、笔记或配置中的相关内容。",
     parameters: Type.Object({
@@ -583,7 +584,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "run_bash",
-    label: "执行命令",
+    label: TOOL_META["run_bash"].label,
     description:
       "在工作区（agent-workdir）目录下执行 shell 命令（Linux/macOS 为 bash，Windows 为 cmd）。返回命令输出（最多 8000 字符）。属于敏感操作，需要用户确认。适合运行脚本、构建、查看环境等操作。",
     parameters: Type.Object({
@@ -631,7 +632,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "port_check",
-    label: "端口查询",
+    label: TOOL_META["port_check"].label,
     description:
       "检查指定端口是否被占用，被占用时返回监听项与进程信息（PID、进程名）。用于排查端口冲突、确认服务是否已启动等场景。",
     parameters: Type.Object({

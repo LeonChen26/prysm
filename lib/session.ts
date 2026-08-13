@@ -10,6 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { messageText } from "./messages";
 
 const SESSIONS_DB = path.resolve(process.cwd(), "sessions.db");
 
@@ -200,17 +201,6 @@ export interface SearchHit {
   snippet: string;
 }
 
-/** 提取消息纯文本（与 contentText 等价，避免依赖 pi-ai） */
-function msgText(m: AgentMessage): string {
-  if (!("content" in m) || m.content == null) return "";
-  const c = m.content;
-  if (typeof c === "string") return c;
-  return c
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .filter(Boolean)
-    .join("\n");
-}
-
 /** 在会话消息内容中搜索关键词，返回命中的会话与片段（每个会话最多 1 条，按最新命中） */
 export function searchSessionMessages(
   query: string,
@@ -234,7 +224,7 @@ export function searchSessionMessages(
     if (seen.has(r.sid) || hits.length >= limit) continue;
     let text = "";
     try {
-      text = msgText(JSON.parse(r.content) as AgentMessage);
+      text = messageText(JSON.parse(r.content) as AgentMessage);
     } catch {
       continue;
     }

@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { messageText } from "./messages";
 
 /**
  * 上下文压缩（阶段 2）
@@ -8,22 +9,6 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 export const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS ?? 50000);
 export const KEEP_RECENT_MESSAGES = Number(process.env.KEEP_RECENT_MESSAGES ?? 8);
-
-/** 把 AgentMessage 的 content 提取为纯文本（用于估算与摘要） */
-export function messageText(m: AgentMessage): string {
-  // AgentMessage 联合包含 bashExecution 等无 content 的消息类型
-  if (!("content" in m) || m.content == null) return "";
-  const content = m.content;
-  if (typeof content === "string") return content;
-  return content
-    .map((b) => {
-      if (b.type === "text") return b.text;
-      if (b.type === "toolCall") return `${b.name}(${JSON.stringify(b.arguments)})`;
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
 
 /** 粗略 token 估算：CJK 约 1.2 字符/token，其他约 3.5 字符/token */
 export function estimateTokens(m: AgentMessage): number {

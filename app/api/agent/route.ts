@@ -116,6 +116,9 @@ export async function POST(req: Request) {
     }
   }
 
+  // 闭包捕获变量：此处 agent 已窄化为非空，用 const 引用避免闭包内重复断言
+  const a = agent;
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -127,7 +130,7 @@ export async function POST(req: Request) {
 
       // 本轮工具调用统计（供运行统计概览）
       const toolCalls: Record<string, number> = {};
-      const unsub = agent!.subscribe(async (event) => {
+      const unsub = a.subscribe(async (event) => {
         const ui = mapEvent(event);
         if (!ui) return;
         if (ui.type === "tool_end") {
@@ -149,15 +152,15 @@ export async function POST(req: Request) {
       let runError: unknown = undefined;
       const runStartedAt = Date.now();
       try {
-        await agent!.prompt(message);
-        await agent!.waitForIdle();
+        await a.prompt(message);
+        await a.waitForIdle();
       } catch (err) {
         runError = err;
         // 用户通过 /api/agent/stop 中止：区分"主动停止"与"真实错误"
         aborted =
           (err instanceof Error &&
             (err.name === "AbortError" || /abort/i.test(err.message))) ||
-          !!agent!.signal?.aborted;
+          !!a.signal?.aborted;
         if (!aborted) {
           send({
             type: "error",
@@ -166,7 +169,7 @@ export async function POST(req: Request) {
         }
       } finally {
         const stopped = aborted || consumeStopped(session.id);
-        const msgs = agent!.state.messages;
+        const msgs = a.state.messages;
         // 阶段 8：持久化会话消息（全量替换）
         try {
           saveSessionMessages(session.id, msgs);
@@ -221,7 +224,7 @@ export async function POST(req: Request) {
         });
         // 阶段 4：把消息写入情景记忆（按内容去重，恢复的历史不会重复写入）
         try {
-          const stored = rememberMessages(agent!.state.messages);
+          const stored = rememberMessages(a.state.messages);
           if (stored > 0) console.log(`[memory] 已写入 ${stored} 条情景记忆`);
         } catch (err) {
           console.error("[memory] 写入失败:", err);
