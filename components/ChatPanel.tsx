@@ -393,9 +393,24 @@ export function ChatPanel() {
           <div className="chat-scroll">
             {messages.length === 0 && (
               <div className="empty">
+                <div className="empty-icon" aria-hidden="true">
+                  <svg
+                    width="40"
+                    height="40"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" />
+                    <path d="M9 10.5h6M9 13.5h3" />
+                  </svg>
+                </div>
                 <p className="empty-title">开始你的第一个任务</p>
                 <p className="empty-sub">
-                  例如：在 agent-workdir 里创建一个 README 文件，说明这个项目的用途
+                  例如：搜索 DeepSeek 最新模型，或在 agent-workdir 里整理一个项目的 README
                 </p>
               </div>
             )}
