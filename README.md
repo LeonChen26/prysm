@@ -41,7 +41,8 @@
 ### 1. 安装依赖
 
 ```bash
-npm install
+npm ci       # 严格按 package-lock.json 安装（推荐，保证版本一致）
+# 或 npm install
 ```
 
 ### 2. 配置环境变量
@@ -177,20 +178,10 @@ pm2 start .next/standalone/server.js --name prysm
 
 ## 测试脚本
 
-根目录 `test-*.ts` 为针对各模块的脚本，用 `tsx` 直接运行：
+测试按类型放在 `tests/` 目录下（`unit/` 离线单测、`web/` 联网搜索、`e2e/` 端到端），用 npm 脚本直接运行：
 
 ```bash
-npx tsx test-todo.ts       # 待办工具
-npx tsx test-session.ts    # 会话存储
-npx tsx test-policy.ts     # 审批白名单策略
-npx tsx test-fileops.ts    # 文件操作工具
-npx tsx test-web.ts        # 联网搜索 / 网页抓取
-npx tsx test-verify.ts     # verify_file 自检
-npx tsx test-parallel.ts   # 并行工具执行
-npx tsx test-context.ts    # 上下文压缩
-npx tsx test-approval.ts   # 工具审批流
-npx tsx test-audit.ts      # 审批历史审计
-npx tsx test-workdir.ts    # 工作区文件浏览器
-npx tsx test-stats.ts      # 运行统计聚合
-npx tsx test-plaintext.ts  # Markdown 转纯文本
+npm run test:unit   # 12 个离线单测（todo/会话/审批/上下文压缩等）
+npm run test:web    # 联网搜索与网页抓取
+npm run test:e2e    # 端到端测试（需先启动 npm run dev）
 ```

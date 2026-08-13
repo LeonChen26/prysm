@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.9"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,13 +17,13 @@
     "test:e2e": "tsx tests/e2e/test-todo-e2e.ts && tsx tests/e2e/test-fileops-e2e.ts && tsx tests/e2e/test-policy-e2e.ts && tsx tests/e2e/test-session-e2e.ts && tsx tests/e2e/test-stop-e2e.ts && tsx tests/e2e/test-verify-e2e.ts && tsx tests/e2e/test-parallel-e2e.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "latest",
-    "@earendil-works/pi-ai": "latest",
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
     "katex": "^0.18.4",
     "mermaid": "^11.16.1",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "next": "^16.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "rehype-katex": "^7.0.1",
@@ -28,10 +31,10 @@
     "remark-math": "^6.0.0"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "tsx": "^4.23.12",
-    "typescript": "latest"
+    "typescript": "^7.0.2"
   }
 }
