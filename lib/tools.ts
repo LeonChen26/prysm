@@ -3,6 +3,7 @@ import path from "node:path";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos } from "./todo";
+import { fetchUrlAsText, webSearch } from "./web";
 
 /** 所有文件工具的作用域：项目下的 agent-workdir 目录 */
 export const AGENT_WORKDIR = path.resolve(process.cwd(), "agent-workdir");
@@ -308,6 +309,59 @@ export const tools: AgentTool[] = [
       return {
         content: [{ type: "text", text: msg }],
         details: { todos },
+      };
+    },
+  },
+  {
+    name: "web_search",
+    label: "网页搜索",
+    description:
+      "搜索互联网获取实时信息（最新新闻、文档、数据等）。返回标题、URL 和摘要列表。当需要最新信息、或问题超出你的知识范围（如时事、价格、版本号）时使用。",
+    parameters: Type.Object({
+      query: Type.String({ description: "搜索关键词" }),
+      limit: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: 10,
+          description: "返回结果条数，默认 5",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, params) => {
+      const results = await webSearch(params.query, params.limit ?? 5);
+      if (results.length === 0) {
+        return {
+          content: [{ type: "text", text: `未找到与 "${params.query}" 相关的搜索结果` }],
+          details: { query: params.query, results: [] },
+        };
+      }
+      const text = results
+        .map(
+          (r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet || "(无摘要)"}`,
+        )
+        .join("\n");
+      return {
+        content: [{ type: "text", text }],
+        details: { query: params.query, results },
+      };
+    },
+  },
+  {
+    name: "fetch_url",
+    label: "抓取网页",
+    description:
+      "抓取指定网页内容并转为纯文本（自动提取标题，最大约 200KB）。用于阅读搜索结果中的文章、官方文档或新闻全文。",
+    parameters: Type.Object({
+      url: Type.String({ description: "网页 URL（http/https）" }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const page = await fetchUrlAsText(params.url);
+      const body = page.text || "(页面无可读文本内容)";
+      return {
+        content: [
+          { type: "text", text: `标题: ${page.title}\n${page.truncated ? "(内容过长已截断)\n" : ""}${body}` },
+        ],
+        details: { url: page.url, title: page.title, truncated: page.truncated },
       };
     },
   },
