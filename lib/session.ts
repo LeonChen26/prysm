@@ -152,6 +152,20 @@ export function getSessionMessages(sessionId: string): AgentMessage[] {
   return messages;
 }
 
+/** 删除会话中的单条消息（按写入顺序的索引），返回删除后的消息列表 */
+export function deleteSessionMessage(
+  sessionId: string,
+  index: number,
+): AgentMessage[] {
+  const messages = getSessionMessages(sessionId);
+  if (index < 0 || index >= messages.length) {
+    throw new Error(`消息索引越界: ${index}（共 ${messages.length} 条）`);
+  }
+  messages.splice(index, 1);
+  saveSessionMessages(sessionId, messages);
+  return messages;
+}
+
 /** 全量替换会话消息（简单可靠，会话消息量经压缩控制在合理范围） */
 export function saveSessionMessages(
   sessionId: string,

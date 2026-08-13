@@ -13,10 +13,18 @@ export const dynamic = "force-dynamic";
 
 function toUiMessage(m: AgentMessage) {
   if (m.role === "user") {
-    return { role: "user" as const, text: contentText(m.content) };
+    return {
+      role: "user" as const,
+      text: contentText(m.content),
+      timestamp: m.timestamp ?? 0,
+    };
   }
   if (m.role === "assistant") {
-    return { role: "assistant" as const, text: contentText(m.content) };
+    return {
+      role: "assistant" as const,
+      text: contentText(m.content),
+      timestamp: m.timestamp ?? 0,
+    };
   }
   return null;
 }

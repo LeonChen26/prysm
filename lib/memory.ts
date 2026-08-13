@@ -152,3 +152,42 @@ export function countEpisodes(): number {
     .get() as { n: number };
   return row.n;
 }
+
+export interface MemoryEpisode {
+  id: number;
+  role: string;
+  content: string;
+  ts: number;
+}
+
+/** 分页列出记忆条目（最新在前） */
+export function listEpisodes(limit = 50, offset = 0): MemoryEpisode[] {
+  const rows = getDb()
+    .prepare(
+      "SELECT id, role, content, ts FROM episodes ORDER BY id DESC LIMIT ? OFFSET ?",
+    )
+    .all(limit, offset) as {
+    id: number;
+    role: string;
+    content: string;
+    ts: number;
+  }[];
+  return rows;
+}
+
+/** 删除单条记忆（同时清理 FTS 索引） */
+export function deleteEpisode(id: number): boolean {
+  const d = getDb();
+  const r = d.prepare("DELETE FROM episodes WHERE id = ?").run(id);
+  d.prepare("DELETE FROM episodes_fts WHERE rowid = ?").run(id);
+  return r.changes > 0;
+}
+
+/** 清空全部记忆（含 FTS 索引） */
+export function clearEpisodes(): number {
+  const d = getDb();
+  const before = d.prepare("SELECT COUNT(*) AS n FROM episodes").get() as { n: number };
+  d.exec("DELETE FROM episodes_fts");
+  d.exec("DELETE FROM episodes");
+  return before.n;
+}

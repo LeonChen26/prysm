@@ -30,6 +30,8 @@ const markdownComponents = {
 interface UiMessage {
   role: "user" | "assistant";
   text: string;
+  /** 消息时间戳（毫秒），用于展示发送时间 */
+  timestamp?: number;
 }
 
 interface ToolCard {
@@ -129,6 +131,10 @@ const TOOL_META: Record<string, { label: string; type: string }> = {
   todo_list: { label: "查看任务计划", type: "任务" },
   web_search: { label: "网页搜索", type: "网络" },
   fetch_url: { label: "抓取网页", type: "网络" },
+  search_files: { label: "搜索文件内容", type: "文件" },
+  run_bash: { label: "执行命令", type: "系统" },
+  env_info: { label: "环境信息", type: "系统" },
+  port_check: { label: "端口查询", type: "系统" },
 };
 
 const TODO_STATUS_LABELS: Record<TodoItem["status"], string> = {
@@ -178,6 +184,19 @@ function formatRelTime(ts: number): string {
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** 消息发送时间：HH:mm（跨天补日期） */
+function formatMsgTime(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return sameDay ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
 /** Markdown 代码块：hover 显示复制按钮 */
@@ -233,6 +252,12 @@ export function ChatPanel() {
   /** todo 追加步骤 */
   const [todoAppendOpen, setTodoAppendOpen] = useState(false);
   const [todoAppendText, setTodoAppendText] = useState("");
+  /** 情景记忆：条目列表 + 总数 + 面板折叠 */
+  const [memoryEpisodes, setMemoryEpisodes] = useState<
+    { id: number; role: string; content: string; ts: number }[]
+  >([]);
+  const [memoryTotal, setMemoryTotal] = useState(0);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   /** 消息编辑：正在编辑的用户消息索引（-1 表示非编辑态） */
   const [editingIndex, setEditingIndex] = useState(-1);
   /** todo 拖拽：记录被拖动的项 id */
@@ -404,6 +429,59 @@ export function ChatPanel() {
       /* 静默 */
     }
   }, []);
+
+  /** 拉取情景记忆列表（展开时或发送后刷新） */
+  const refreshMemory = useCallback(async () => {
+    try {
+      const r = await fetch("/api/memory?limit=50");
+      const data = await r.json();
+      if (Array.isArray(data?.episodes)) {
+        setMemoryEpisodes(data.episodes);
+        setMemoryTotal(Number(data.total ?? data.episodes.length));
+      }
+    } catch {
+      /* 静默 */
+    }
+  }, []);
+
+  /** 删除单条情景记忆 */
+  const removeMemory = useCallback(
+    async (id: number) => {
+      try {
+        const r = await fetch(`/api/memory?id=${id}`, { method: "DELETE" });
+        const data = await r.json();
+        if (data?.total !== undefined) setMemoryTotal(data.total);
+        setMemoryEpisodes((list) => list.filter((e) => e.id !== id));
+      } catch {
+        setError("删除记忆失败");
+      }
+    },
+    [],
+  );
+
+  /** 清空全部情景记忆 */
+  const clearAllMemory = useCallback(async () => {
+    if (memoryTotal === 0) return;
+    try {
+      const r = await fetch("/api/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear" }),
+      });
+      const data = await r.json();
+      if (data?.ok) {
+        setMemoryEpisodes([]);
+        setMemoryTotal(0);
+      }
+    } catch {
+      setError("清空记忆失败");
+    }
+  }, [memoryTotal]);
+
+  // 初始拉取情景记忆数量
+  useEffect(() => {
+    refreshMemory();
+  }, [refreshMemory]);
 
   /** 置顶 / 取消置顶会话 */
   const togglePin = useCallback(
@@ -602,9 +680,10 @@ export function ChatPanel() {
         setBusy(false);
         busyRef.current = false;
         refreshSessions();
+        refreshMemory();
       }
     },
-    [sessionId, refreshSessions],
+    [sessionId, refreshSessions, refreshMemory],
   );
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
@@ -706,6 +785,31 @@ export function ChatPanel() {
       }, 1200);
     },
     [],
+  );
+
+  /** 删除单条消息（同步会话存储与 Agent 历史） */
+  const deleteMessage = useCallback(
+    async (index: number) => {
+      if (busyRef.current) return;
+      const target = messages[index];
+      if (!target) return;
+      setMessages((m) => m.filter((_, i) => i !== index));
+      if (editingIndex === index) setEditingIndex(-1);
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error ?? "删除消息失败");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [messages, sessionId, editingIndex],
   );
 
   /** 保存会话重命名 */
@@ -1263,32 +1367,47 @@ export function ChatPanel() {
                       <span className="cursor-blink" />
                     )}
                     {groupEnd && m.text && (
-                      <div className="msg-actions">
-                        <button
-                          type="button"
-                          className="msg-action"
-                          onClick={(e) => copyMessage(m.text, e)}
-                        >
-                          复制
-                        </button>
-                        {m.role === "user" && (
+                      <div className="msg-meta">
+                        {m.timestamp ? (
+                          <span className="msg-time">
+                            {formatMsgTime(m.timestamp)}
+                          </span>
+                        ) : null}
+                        <div className="msg-actions">
                           <button
                             type="button"
                             className="msg-action"
-                            onClick={() => startEdit(i)}
+                            onClick={(e) => copyMessage(m.text, e)}
                           >
-                            编辑
+                            复制
                           </button>
-                        )}
-                        {m.role === "assistant" && (
+                          {m.role === "user" && (
+                            <button
+                              type="button"
+                              className="msg-action"
+                              onClick={() => startEdit(i)}
+                            >
+                              编辑
+                            </button>
+                          )}
+                          {m.role === "assistant" && (
+                            <button
+                              type="button"
+                              className="msg-action"
+                              onClick={() => regenerate(i)}
+                            >
+                              重新生成
+                            </button>
+                          )}
                           <button
                             type="button"
-                            className="msg-action"
-                            onClick={() => regenerate(i)}
+                            className="msg-action msg-action-del"
+                            title="删除这条消息"
+                            onClick={() => deleteMessage(i)}
                           >
-                            重新生成
+                            删除
                           </button>
-                        )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1366,6 +1485,59 @@ export function ChatPanel() {
             <span className="panel-count">{cards.length}</span>
           </div>
           <div className="panel-scroll">
+            <div className="memory-section">
+              <div className="panel-title memory-head">
+                <h2>情景记忆</h2>
+                <span className="panel-count">{memoryTotal}</span>
+              </div>
+              {memoryOpen && memoryTotal > 0 && (
+                <div className="memory-body">
+                  {memoryEpisodes.map((e) => (
+                    <div key={e.id} className="memory-item">
+                      <div className="memory-item-head">
+                        <span
+                          className={`memory-role memory-role-${e.role === "user" ? "user" : "assistant"}`}
+                        >
+                          {e.role === "user" ? "用户" : "Agent"}
+                        </span>
+                        <span className="memory-time">
+                          {formatMsgTime(e.ts)}
+                        </span>
+                        <button
+                          type="button"
+                          className="memory-del"
+                          title="删除该条记忆"
+                          onClick={() => removeMemory(e.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <p className="memory-content">{e.content}</p>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="memory-clear"
+                    onClick={clearAllMemory}
+                  >
+                    清空全部记忆
+                  </button>
+                </div>
+              )}
+              {memoryOpen && memoryTotal === 0 && (
+                <p className="memory-empty">暂无记忆</p>
+              )}
+              <button
+                type="button"
+                className="memory-toggle"
+                onClick={() => {
+                  setMemoryOpen((v) => !v);
+                  if (!memoryOpen) refreshMemory();
+                }}
+              >
+                {memoryOpen ? "收起记忆" : "查看记忆"}
+              </button>
+            </div>
             {approvals.length > 0 && (
               <div className="approval-list">
                 {approvals.map((a) => (

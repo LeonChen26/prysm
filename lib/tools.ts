@@ -128,6 +128,49 @@ function runCommand(
   });
 }
 
+/** 查询指定端口是否被占用，返回人类可读的结果（跨平台） */
+async function checkPort(port: number): Promise<string> {
+  if (process.platform === "win32") {
+    const r = await runCommand("netstat -ano", process.cwd(), 10_000);
+    if (r.exitCode !== 0) return `查询失败: ${r.output}`;
+    const re = new RegExp(`:${port}\\s`);
+    const lines = r.output
+      .split("\n")
+      .filter((l) => re.test(l) && /LISTENING/i.test(l));
+    if (lines.length === 0) return `端口 ${port} 未被占用`;
+    const pids = new Set<string>();
+    for (const l of lines) {
+      const m = l.trim().match(/(\d+)\s*$/);
+      if (m) pids.add(m[1]);
+    }
+    const names: string[] = [];
+    for (const pid of pids) {
+      const t = await runCommand(
+        `tasklist /FI "PID eq ${pid}" /FO CSV /NH`,
+        process.cwd(),
+        10_000,
+      );
+      const m = t.output.match(/"([^"]+)"/);
+      names.push(m ? `${m[1]} (PID ${pid})` : `PID ${pid}`);
+    }
+    return (
+      `端口 ${port} 被占用（${lines.length} 个监听项）：\n` +
+      lines.slice(0, 8).join("\n") +
+      `\n进程: ${names.join("、") || "未知"}`
+    );
+  }
+  // macOS / Linux
+  const r = await runCommand(
+    `lsof -i :${port} -P -n 2>/dev/null || true`,
+    process.cwd(),
+    10_000,
+  );
+  if (r.exitCode === 0 && r.output.trim()) {
+    return `端口 ${port} 占用情况:\n${r.output}`;
+  }
+  return `端口 ${port} 未被占用`;
+}
+
 /**
  * 各工具 execute 收到的参数（运行时来自模型 JSON，Schema 校验由框架完成）。
  * 必需字段由各自 schema 保证存在，这里仅供 TS 静态检查。
@@ -141,6 +184,7 @@ interface ToolArgs {
   query: string;
   url: string;
   command: string;
+  port: number;
   items: { title: string; detail?: string }[];
   expect?: string;
   limit?: number;
@@ -578,6 +622,51 @@ export const tools: AgentTool<any>[] = [
           },
         ],
         details: { command: params.command, exitCode, truncated: output.length > 8000 },
+      };
+    },
+  },
+  {
+    name: "env_info",
+    label: "环境信息",
+    description:
+      "查看当前运行环境信息：操作系统与架构、Node 版本、进程运行时长与内存占用、工作区（agent-workdir）路径和白名单目录。用于排查环境相关问题时快速了解 Agent 的运行上下文。",
+    parameters: Type.Object({}),
+    execute: async () => {
+      const mem = process.memoryUsage();
+      const lines = [
+        `平台: ${process.platform} ${process.arch}`,
+        `Node 版本: ${process.version}`,
+        `运行时长: ${Math.floor(process.uptime() / 60)} 分钟 ${Math.floor(process.uptime() % 60)} 秒`,
+        `内存占用: ${(mem.rss / 1024 / 1024).toFixed(1)} MB (rss) / ${(mem.heapUsed / 1024 / 1024).toFixed(1)} MB (heap)`,
+        `工作区目录: ${AGENT_WORKDIR}`,
+        ALLOWED_ROOTS.length > 0
+          ? `白名单目录: ${ALLOWED_ROOTS.join(", ")}`
+          : "白名单目录: (无)",
+      ];
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { platform: process.platform, arch: process.arch },
+      };
+    },
+  },
+  {
+    name: "port_check",
+    label: "端口查询",
+    description:
+      "检查指定端口是否被占用，被占用时返回监听项与进程信息（PID、进程名）。用于排查端口冲突、确认服务是否已启动等场景。",
+    parameters: Type.Object({
+      port: Type.Integer({
+        minimum: 1,
+        maximum: 65535,
+        description: "要查询的端口号（1-65535）",
+      }),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
+      const text = await checkPort(params.port);
+      return {
+        content: [{ type: "text", text }],
+        details: { port: params.port },
       };
     },
   },
