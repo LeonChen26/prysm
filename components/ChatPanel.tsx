@@ -321,24 +321,36 @@ function extractFileRefs(text: string): { cleaned: string; refs: { path: string 
   return { cleaned, refs };
 }
 
-/** Mermaid 流程图：客户端懒加载渲染 ```mermaid 代码块 */
+/** Mermaid 流程图：客户端懒加载渲染 ```mermaid 代码块，跟随全局主题并在切换时自动重渲染 */
 function MermaidDiagram({ code }: { code: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
   const [errText, setErrText] = useState("");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  // 监听 html[data-theme] 变化（主题切换时触发重新渲染）
+  useEffect(() => {
+    const read = () =>
+      setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
     (async () => {
       try {
-        // 跟随全局主题（html[data-theme]）
-        const dark = document.documentElement.dataset.theme === "dark";
         const mermaid = (await import("mermaid")).default;
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
-          theme: dark ? "dark" : "default",
+          theme: theme === "dark" ? "dark" : "default",
         });
         const id = `m-${Math.random().toString(36).slice(2, 10)}`;
         const { svg } = await mermaid.render(id, code);
@@ -354,7 +366,7 @@ function MermaidDiagram({ code }: { code: string }) {
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, theme]);
 
   if (status === "error") {
     return (
