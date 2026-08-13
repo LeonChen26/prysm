@@ -157,11 +157,22 @@ export function deleteSessionMessage(
   sessionId: string,
   index: number,
 ): AgentMessage[] {
+  return deleteSessionMessages(sessionId, [index]);
+}
+
+/** 批量删除会话消息（按索引，自动从大到小避免错位），返回删除后的消息列表 */
+export function deleteSessionMessages(
+  sessionId: string,
+  indices: number[],
+): AgentMessage[] {
   const messages = getSessionMessages(sessionId);
-  if (index < 0 || index >= messages.length) {
-    throw new Error(`消息索引越界: ${index}（共 ${messages.length} 条）`);
+  const sorted = [...new Set(indices)]
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < messages.length)
+    .sort((a, b) => b - a);
+  if (sorted.length === 0) {
+    throw new Error(`没有有效的消息索引: ${indices.join(",")}`);
   }
-  messages.splice(index, 1);
+  for (const i of sorted) messages.splice(i, 1);
   saveSessionMessages(sessionId, messages);
   return messages;
 }

@@ -22,6 +22,9 @@
 - **命令执行**：`run_bash` 工具在工作区内执行 shell 命令（需审批）
 - **运行日志**：记录每次 Agent 执行（耗时 / 消息数 / 结果），侧栏可查看
 - **智能标题**：对话多轮后自动生成精炼会话标题
+- **工作区文件浏览器**：侧栏可视化 agent-workdir 目录树，支持浏览 / 预览 / 新建 / 上传文件
+- **完成通知**：任务结束且页面不在前台时发送浏览器通知（铃铛开关）
+- **消息体验**：超长消息自动折叠展开、多选批量删除消息
 
 ## 环境要求
 
@@ -126,6 +129,9 @@ pm2 start .next/standalone/server.js --name workbuddy-agent
 | `POST /api/memory` | 清空全部记忆（`{ action: "clear" }`） |
 | `GET /api/backup` | 导出全部数据（会话 + 记忆 + 任务计划）为 JSON |
 | `POST /api/backup` | 导入备份并清空重建 |
+| `GET /api/workdir?path=xxx` | 列出工作区目录条目（`path` 相对目录，默认根目录） |
+| `GET /api/workdir/content?path=xxx` | 预览工作区内文本文件 |
+| `POST /api/workdir` | 新建文件 / 目录（JSON）或上传文件（multipart） |
 
 ## 环境变量
 

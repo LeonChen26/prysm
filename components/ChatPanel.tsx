@@ -153,6 +153,9 @@ const QUICK_TASKS = [
   "写一份 Next.js 服务端组件的介绍",
 ];
 
+/** 超过该字符数的消息默认折叠，点击展开 */
+const LONG_MSG_THRESHOLD = 4000;
+
 /** 会话分组：今天 / 昨天 / 7天内 / 更早（基于 updatedAt） */
 function groupOf(ts: number): string {
   if (!ts) return "更早";
@@ -303,6 +306,27 @@ export function ChatPanel() {
     }[]
   >([]);
   const [logsOpen, setLogsOpen] = useState(false);
+  /** 浏览器通知开关（任务完成时提醒） */
+  const [notifyOn, setNotifyOn] = useState(false);
+  /** 工作区文件浏览器 */
+  const [wbOpen, setWbOpen] = useState(false);
+  const [wbDirs, setWbDirs] = useState<
+    Record<string, { name: string; isDir: boolean; size: number; mtime: number }[]>
+  >({});
+  const [wbExpanded, setWbExpanded] = useState<Set<string>>(new Set());
+  const [wbPreview, setWbPreview] = useState<{
+    path: string;
+    content: string;
+    truncated: boolean;
+  } | null>(null);
+  const [wbCreateOpen, setWbCreateOpen] = useState(false);
+  const [wbCreateName, setWbCreateName] = useState("");
+  const [wbCreateType, setWbCreateType] = useState<"file" | "dir">("file");
+  /** 超长消息展开集合（默认折叠） */
+  const [longOpen, setLongOpen] = useState<Set<number>>(new Set());
+  /** 消息多选批量删除模式 */
+  const [msgSelectMode, setMsgSelectMode] = useState(false);
+  const [msgSelected, setMsgSelected] = useState<Set<number>>(new Set());
   /** 消息编辑：正在编辑的用户消息索引（-1 表示非编辑态） */
   const [editingIndex, setEditingIndex] = useState(-1);
   /** todo 拖拽：记录被拖动的项 id */
@@ -345,6 +369,57 @@ export function ChatPanel() {
       return next;
     });
   }, [applyTheme]);
+
+  // 读取通知开关设置
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("wb-notify") === "1") setNotifyOn(true);
+    } catch {
+      /* 忽略 */
+    }
+  }, []);
+
+  /** 切换通知开关（首次开启时请求浏览器授权） */
+  const toggleNotify = useCallback(async () => {
+    if (!("Notification" in window)) {
+      setError("当前浏览器不支持通知");
+      return;
+    }
+    if (!notifyOn && Notification.permission === "default") {
+      const p = await Notification.requestPermission();
+      if (p !== "granted") {
+        setError("通知权限未授予");
+        return;
+      }
+    }
+    setNotifyOn((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("wb-notify", next ? "1" : "0");
+      } catch {
+        /* 忽略 */
+      }
+      return next;
+    });
+  }, [notifyOn]);
+
+  /** 任务完成时发送浏览器通知（页面不在前台且已授权） */
+  const notifyCompletion = useCallback(
+    (sessionTitle: string) => {
+      if (!notifyOn) return;
+      try {
+        if (document.visibilityState === "visible") return;
+        if (!("Notification" in window) || Notification.permission !== "granted") return;
+        new Notification("WorkBuddy Agent 任务完成", {
+          body: sessionTitle || "未命名会话",
+          tag: "wb-task-done",
+        });
+      } catch {
+        /* 通知失败静默 */
+      }
+    },
+    [notifyOn],
+  );
 
   // 会话搜索：本地标题过滤之外，防抖查询后端消息内容匹配
   useEffect(() => {
@@ -548,6 +623,119 @@ export function ChatPanel() {
     }
   }, []);
 
+  /** 加载工作区某目录的条目（缓存到 wbDirs） */
+  const loadDir = useCallback(async (dir: string) => {
+    try {
+      const r = await fetch(`/api/workdir?path=${encodeURIComponent(dir)}`);
+      const data = await r.json();
+      if (Array.isArray(data?.entries)) {
+        setWbDirs((prev) => ({ ...prev, [dir]: data.entries }));
+      }
+    } catch {
+      /* 静默 */
+    }
+  }, []);
+
+  /** 展开 / 收起目录（展开时懒加载） */
+  const toggleDir = useCallback(
+    (dir: string) => {
+      setWbExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(dir)) {
+          next.delete(dir);
+        } else {
+          next.add(dir);
+          if (!wbDirs[dir]) loadDir(dir);
+        }
+        return next;
+      });
+    },
+    [wbDirs, loadDir],
+  );
+
+  /** 预览文件内容 */
+  const openFile = useCallback(async (path: string) => {
+    try {
+      const r = await fetch(`/api/workdir/content?path=${encodeURIComponent(path)}`);
+      const data = await r.json();
+      if (data?.ok) {
+        setWbPreview({ path, content: data.content, truncated: data.truncated });
+      } else {
+        setError(data?.error ?? "读取文件失败");
+      }
+    } catch {
+      setError("读取文件失败");
+    }
+  }, []);
+
+  /** 新建文件 / 目录 */
+  const createWorkdirEntry = useCallback(async () => {
+    const name = wbCreateName.trim();
+    if (!name) return;
+    setWbCreateOpen(false);
+    setWbCreateName("");
+    try {
+      const r = await fetch("/api/workdir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: name, type: wbCreateType, content: "" }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        throw new Error(data?.error ?? "创建失败");
+      }
+      setInfo(`已创建${wbCreateType === "dir" ? "目录" : "文件"}: ${name}`);
+      setWbDirs({});
+      loadDir("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [wbCreateName, wbCreateType, loadDir]);
+
+  /** 上传文件到工作区根目录 */
+  const uploadWorkdirFile = useCallback(
+    async (file: File) => {
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("dir", "");
+        const r = await fetch("/api/workdir", { method: "POST", body: form });
+        const data = await r.json();
+        if (!r.ok || !data.ok) {
+          throw new Error(data?.error ?? "上传失败");
+        }
+        setInfo(`已上传: ${data.path}（${data.bytes} 字节）`);
+        setWbDirs({});
+        loadDir("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [loadDir],
+  );
+
+  /** 消息多选批量删除 */
+  const batchDeleteMessages = useCallback(async () => {
+    if (msgSelected.size === 0 || !sessionId) return;
+    const indices = [...msgSelected].sort((a, b) => a - b);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ indices }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? "删除失败");
+      }
+      setMessages((m) => m.filter((_, i) => !msgSelected.has(i)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+    setMsgSelectMode(false);
+    setMsgSelected(new Set());
+  }, [msgSelected, sessionId]);
+
   // 初始拉取情景记忆数量
   useEffect(() => {
     refreshMemory();
@@ -556,6 +744,10 @@ export function ChatPanel() {
   useEffect(() => {
     refreshRunLogs();
   }, [refreshRunLogs]);
+  // 初始加载工作区根目录
+  useEffect(() => {
+    loadDir("");
+  }, [loadDir]);
 
   /** 导出全部数据备份（下载 JSON） */
   const exportBackup = useCallback(async () => {
@@ -803,6 +995,11 @@ export function ChatPanel() {
             case "error":
               setError(ev.message ?? "发生错误");
               break;
+            case "done": {
+              const s = sessions.find((x) => x.id === sessionId);
+              notifyCompletion(s?.title ?? "");
+              break;
+            }
           }
         });
       } catch (err) {
@@ -815,7 +1012,7 @@ export function ChatPanel() {
         refreshRunLogs();
       }
     },
-    [sessionId, refreshSessions, refreshMemory, refreshRunLogs],
+    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, sessions, notifyCompletion],
   );
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
@@ -1121,6 +1318,68 @@ export function ChatPanel() {
     }
   }, [todoAppendText]);
 
+  /** 展开 / 收起超长消息 */
+  const toggleLong = useCallback((i: number) => {
+    setLongOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }, []);
+
+  /** 渲染工作区目录树（递归，懒加载） */
+  const renderWbTree = (dir: string, depth: number): React.ReactNode => {
+    const entries = wbDirs[dir] ?? [];
+    return entries.map((e) => {
+      const childPath = dir ? `${dir}/${e.name}` : e.name;
+      if (e.isDir) {
+        return (
+          <div
+            key={childPath}
+            className="wb-row"
+            style={{ paddingLeft: 6 + depth * 14 }}
+          >
+            <button
+              type="button"
+              className="wb-node"
+              onClick={() => toggleDir(childPath)}
+            >
+              <span className="wb-arrow" aria-hidden="true">
+                {wbExpanded.has(childPath) ? "▾" : "▸"}
+              </span>
+              <span className="wb-icon" aria-hidden="true">
+                📁
+              </span>
+              <span className="wb-name">{e.name}</span>
+            </button>
+            {wbExpanded.has(childPath) && renderWbTree(childPath, depth + 1)}
+          </div>
+        );
+      }
+      return (
+        <div
+          key={childPath}
+          className="wb-row"
+          style={{ paddingLeft: 6 + depth * 14 }}
+        >
+          <button
+            type="button"
+            className="wb-node"
+            onClick={() => openFile(childPath)}
+            title={e.size > 0 ? `${e.size} 字节` : "空文件"}
+          >
+            <span className="wb-arrow wb-arrow-empty" aria-hidden="true" />
+            <span className="wb-icon" aria-hidden="true">
+              📄
+            </span>
+            <span className="wb-name">{e.name}</span>
+          </button>
+        </div>
+      );
+    });
+  };
+
   return (
     <div className="app">
       <header className="app-header">
@@ -1137,6 +1396,26 @@ export function ChatPanel() {
           <span className="status-dot" />
           {busy ? "正在执行任务…" : "空闲"}
         </div>
+        <button
+          className={`notify-toggle ${notifyOn ? "notify-on" : ""}`}
+          onClick={toggleNotify}
+          title={notifyOn ? "关闭任务完成通知" : "开启任务完成通知"}
+          aria-label="切换完成通知"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+        </button>
         <button
           className="theme-toggle"
           onClick={toggleTheme}
@@ -1440,6 +1719,44 @@ export function ChatPanel() {
             ref={chatScrollRef}
             onScroll={onChatScroll}
           >
+            {messages.length > 0 && (
+              <div className="msg-toolbar">
+                {msgSelectMode ? (
+                  <>
+                    <span className="msg-toolbar-count">
+                      已选 {msgSelected.size} 条
+                    </span>
+                    <button
+                      type="button"
+                      className="msg-toolbar-del"
+                      disabled={msgSelected.size === 0}
+                      onClick={batchDeleteMessages}
+                    >
+                      删除
+                    </button>
+                    <button
+                      type="button"
+                      className="msg-toolbar-cancel"
+                      onClick={() => {
+                        setMsgSelectMode(false);
+                        setMsgSelected(new Set());
+                      }}
+                    >
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="msg-toolbar-multi"
+                    onClick={() => setMsgSelectMode(true)}
+                    title="多选批量删除消息"
+                  >
+                    多选删除
+                  </button>
+                )}
+              </div>
+            )}
             {messages.length === 0 && (
               <div className="empty">
                 <div className="empty-icon" aria-hidden="true">
@@ -1482,16 +1799,39 @@ export function ChatPanel() {
               // iMessage 气泡分组：连续同角色消息合并，仅组尾显示尾巴与头像
               const groupEnd = !next || next.role !== m.role;
               const groupMid = !!prev && prev.role === m.role && !!next && next.role === m.role;
+              const longMsg = m.text.length > LONG_MSG_THRESHOLD;
+              const msgCollapsed = longMsg && !longOpen.has(i);
               const cls = [
                 "message",
                 `message-${m.role}`,
                 groupEnd ? "group-end" : "",
                 groupMid ? "group-mid" : "",
+                msgSelected.has(i) ? "msg-selected" : "",
               ]
                 .filter(Boolean)
                 .join(" ");
               return (
-                <div key={i} className={cls}>
+                <div
+                  key={i}
+                  className={cls}
+                  onClick={(e) => {
+                    if (!msgSelectMode) return;
+                    const t = e.target as HTMLElement;
+                    if (t.closest("button, input, a, pre, code, .md")) return;
+                    setMsgSelected((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(i)) next.delete(i);
+                      else next.add(i);
+                      return next;
+                    });
+                  }}
+                >
+                  {msgSelectMode && (
+                    <span
+                      className={`msg-check ${msgSelected.has(i) ? "msg-check-on" : ""}`}
+                      aria-hidden="true"
+                    />
+                  )}
                   <div className="message-role" aria-hidden={!groupEnd}>
                     {m.role === "user" ? (
                       <span aria-hidden="true">●</span>
@@ -1508,9 +1848,20 @@ export function ChatPanel() {
                             rehypePlugins={[rehypeHighlight, rehypeKatex]}
                             components={{ ...markdownComponents, pre: CodeBlock }}
                           >
-                            {m.text}
+                            {msgCollapsed ? m.text.slice(0, 3000) + "\n\n…" : m.text}
                           </ReactMarkdown>
                         </div>
+                        {longMsg && (
+                          <button
+                            type="button"
+                            className="msg-collapse"
+                            onClick={() => toggleLong(i)}
+                          >
+                            {msgCollapsed
+                              ? `展开全文（共 ${m.text.length} 字）`
+                              : "收起"}
+                          </button>
+                        )}
                         {busy && i === messages.length - 1 && m.role === "assistant" && (
                           <span className="cursor-blink" aria-hidden="true" />
                         )}
@@ -1652,6 +2003,96 @@ export function ChatPanel() {
             <span className="panel-count">{cards.length}</span>
           </div>
           <div className="panel-scroll">
+            <div className="wb-section">
+              <div className="panel-title wb-head">
+                <h2>工作区文件</h2>
+                <div className="wb-head-actions">
+                  <label className="wb-act" title="上传文件到工作区">
+                    ⬆
+                    <input
+                      type="file"
+                      hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) uploadWorkdirFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="wb-act"
+                    title="新建文件 / 目录"
+                    onClick={() => setWbCreateOpen((v) => !v)}
+                  >
+                    ＋
+                  </button>
+                </div>
+              </div>
+              {wbCreateOpen && (
+                <div className="wb-create">
+                  <input
+                    className="wb-create-input"
+                    placeholder="名称（如 notes/readme.md）"
+                    value={wbCreateName}
+                    autoFocus
+                    onChange={(e) => setWbCreateName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") createWorkdirEntry();
+                      if (e.key === "Escape") {
+                        setWbCreateOpen(false);
+                        setWbCreateName("");
+                      }
+                    }}
+                  />
+                  <div className="wb-create-type">
+                    <button
+                      type="button"
+                      className={`wb-type-btn ${wbCreateType === "file" ? "wb-type-on" : ""}`}
+                      onClick={() => setWbCreateType("file")}
+                    >
+                      文件
+                    </button>
+                    <button
+                      type="button"
+                      className={`wb-type-btn ${wbCreateType === "dir" ? "wb-type-on" : ""}`}
+                      onClick={() => setWbCreateType("dir")}
+                    >
+                      目录
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="wb-tree">
+                {wbDirs[""] !== undefined ? (
+                  wbDirs[""].length === 0 ? (
+                    <p className="wb-empty">（空）</p>
+                  ) : (
+                    renderWbTree("", 0)
+                  )
+                ) : (
+                  <p className="wb-empty">加载中…</p>
+                )}
+              </div>
+              {wbPreview && (
+                <div className="wb-preview">
+                  <div className="wb-preview-head">
+                    <span className="wb-preview-path">{wbPreview.path}</span>
+                    <button
+                      type="button"
+                      className="wb-preview-close"
+                      onClick={() => setWbPreview(null)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <pre className="wb-preview-body">
+                    {wbPreview.content}
+                    {wbPreview.truncated ? "\n…(内容过长，已截断)" : ""}
+                  </pre>
+                </div>
+              )}
+            </div>
             <div className="memory-section">
               <div className="panel-title memory-head">
                 <h2>情景记忆</h2>

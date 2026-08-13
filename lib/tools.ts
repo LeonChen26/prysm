@@ -5,16 +5,10 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
 import { fetchUrlAsText, webSearch } from "./web";
+import { AGENT_WORKDIR, ALLOWED_ROOTS, resolveInWorkdir } from "./paths";
 
-/** 所有文件工具的作用域：项目下的 agent-workdir 目录 */
-export const AGENT_WORKDIR = path.resolve(process.cwd(), "agent-workdir");
-
-/** 额外可访问的根目录白名单（AGENT_ALLOWED_PATHS，逗号分隔的绝对或相对路径） */
-export const ALLOWED_ROOTS = (process.env.AGENT_ALLOWED_PATHS ?? "")
-  .split(",")
-  .map((p) => p.trim())
-  .filter(Boolean)
-  .map((p) => path.resolve(p));
+// re-export 兼容历史导入（测试脚本从 lib/tools 引入 AGENT_WORKDIR）
+export { AGENT_WORKDIR, ALLOWED_ROOTS } from "./paths";
 
 interface FileHit {
   path: string;
@@ -86,20 +80,6 @@ async function searchInWorkdir(
 
   await walk(AGENT_WORKDIR);
   return hits;
-}
-
-function resolveInWorkdir(relative: string): string {
-  const resolved = path.resolve(AGENT_WORKDIR, relative);
-  if (resolved !== AGENT_WORKDIR && !resolved.startsWith(AGENT_WORKDIR + path.sep)) {
-    // 不在工作区内：检查是否落在白名单根目录下
-    const insideAllowed = ALLOWED_ROOTS.some(
-      (root) => resolved === root || resolved.startsWith(root + path.sep),
-    );
-    if (!insideAllowed) {
-      throw new Error(`路径越界: "${relative}" 不在 agent-workdir 内`);
-    }
-  }
-  return resolved;
 }
 
 interface CommandResult {
