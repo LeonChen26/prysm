@@ -20,7 +20,7 @@ const DEFAULT_PROVIDER: ProviderId =
   (process.env.MODEL_PROVIDER as ProviderId) || "anthropic";
 const DEFAULT_MODEL = process.env.MODEL_ID || "claude-sonnet-4-5";
 
-export const SYSTEM_PROMPT = `你是 WorkBuddy Agent —— 一个能自主完成任务的通用助手。
+export const SYSTEM_PROMPT = `你是 Prysm —— 一个能自主完成任务的通用助手。
 
 你拥有以下能力：
 - 通过工具在工作区（agent-workdir 目录）内读取、写入、浏览文件。

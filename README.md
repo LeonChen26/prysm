@@ -1,4 +1,4 @@
-# WorkBuddy Agent
+# Prysm
 
 基于 [pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core) 的自主任务 Agent，可在工作区内自主读写文件、联网搜索、跨会话记忆，支持多提供商模型与工具审批流。
 
@@ -102,7 +102,7 @@ PORT=3100 HOSTNAME=0.0.0.0 node server.js
 部署到服务器时建议用 `pm2` 等进程守护工具：
 
 ```bash
-pm2 start .next/standalone/server.js --name workbuddy-agent
+pm2 start .next/standalone/server.js --name prysm
 ```
 
 **注意**：

@@ -583,7 +583,7 @@ export function ChatPanel() {
       try {
         if (document.visibilityState === "visible") return;
         if (!("Notification" in window) || Notification.permission !== "granted") return;
-        new Notification("WorkBuddy Agent 任务完成", {
+        new Notification("Prysm 任务完成", {
           body: sessionTitle || "未命名会话",
           tag: "wb-task-done",
         });
@@ -983,7 +983,7 @@ export function ChatPanel() {
       const date = new Date();
       const stamp = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}-${String(date.getHours()).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}`;
       a.href = URL.createObjectURL(blob);
-      a.download = `workbuddy-backup-${stamp}.json`;
+      a.download = `prysm-backup-${stamp}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1676,7 +1676,7 @@ export function ChatPanel() {
         </div>
         <div className="brand">
           <span className="brand-dot" />
-          <h1>WorkBuddy Agent</h1>
+          <h1>Prysm</h1>
         </div>
         <div className={`status ${busy ? "status-busy" : ""}`}>
           <span className="status-dot" />

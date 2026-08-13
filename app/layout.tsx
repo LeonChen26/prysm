@@ -3,7 +3,7 @@ import "./globals.css";
 import "katex/dist/katex.min.css";
 
 export const metadata: Metadata = {
-  title: "WorkBuddy Agent",
+  title: "Prysm",
   description: "基于 pi-agent-core 的自主任务助手",
 };
 
