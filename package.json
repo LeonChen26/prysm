@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit",
+    "test:unit": "tsx test-todo.ts && tsx test-policy.ts && tsx test-fileops.ts && tsx test-verify.ts && tsx test-session.ts && tsx test-parallel.ts",
+    "test:web": "tsx test-web.ts",
+    "test:e2e": "tsx test-todo-e2e.ts && tsx test-fileops-e2e.ts && tsx test-policy-e2e.ts && tsx test-session-e2e.ts && tsx test-stop-e2e.ts && tsx test-verify-e2e.ts && tsx test-parallel-e2e.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "latest",
