@@ -229,6 +229,8 @@ export function ChatPanel() {
   /** todo 追加步骤 */
   const [todoAppendOpen, setTodoAppendOpen] = useState(false);
   const [todoAppendText, setTodoAppendText] = useState("");
+  /** 消息编辑：正在编辑的用户消息索引（-1 表示非编辑态） */
+  const [editingIndex, setEditingIndex] = useState(-1);
   /** todo 拖拽：记录被拖动的项 id */
   const todoDragRef = useRef<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -297,6 +299,8 @@ export function ChatPanel() {
       setApprovals([]);
       setError(null);
       setMessages([]);
+      setEditingIndex(-1);
+      setInput("");
       try {
         const res = await fetch(`/api/sessions/${id}`);
         const data = await res.json();
@@ -569,13 +573,42 @@ export function ChatPanel() {
     [sessionId, refreshSessions],
   );
 
-  /** 发送输入框内容 */
+  /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
   const send = useCallback(async () => {
     const text = input.trim();
     if (!text) return;
     setInput("");
+    if (editingIndex >= 0 && messages[editingIndex]?.role === "user") {
+      const idx = editingIndex;
+      setEditingIndex(-1);
+      // 截断到该条用户消息并替换为编辑后的内容，后端按 rewindToText 同步截断历史
+      setMessages((m) => m.slice(0, idx).concat([{ role: "user", text }]));
+      await streamReply(text, text, false);
+      return;
+    }
     await streamReply(text);
-  }, [input, streamReply]);
+  }, [input, streamReply, editingIndex, messages]);
+
+  /** 进入消息编辑态：载入输入框并聚焦 */
+  const startEdit = useCallback(
+    (msgIndex: number) => {
+      const target = messages[msgIndex];
+      if (!target || target.role !== "user" || busyRef.current) return;
+      setEditingIndex(msgIndex);
+      setInput(target.text);
+      setError(null);
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLTextAreaElement>(".chat-input")?.focus();
+      });
+    },
+    [messages],
+  );
+
+  /** 取消消息编辑 */
+  const cancelEdit = useCallback(() => {
+    setEditingIndex(-1);
+    setInput("");
+  }, []);
 
   /** 快捷任务入口 */
   const sendQuick = useCallback(
@@ -1183,6 +1216,15 @@ export function ChatPanel() {
                         >
                           复制
                         </button>
+                        {m.role === "user" && (
+                          <button
+                            type="button"
+                            className="msg-action"
+                            onClick={() => startEdit(i)}
+                          >
+                            编辑
+                          </button>
+                        )}
                         {m.role === "assistant" && (
                           <button
                             type="button"
@@ -1208,7 +1250,16 @@ export function ChatPanel() {
               send();
             }}
           >
+            {editingIndex >= 0 && (
+              <div className="edit-banner">
+                <span>正在编辑第 {editingIndex + 1} 条消息，发送后将截断后续内容重新生成</span>
+                <button type="button" className="edit-cancel" onClick={cancelEdit}>
+                  取消
+                </button>
+              </div>
+            )}
             <textarea
+              className="chat-input"
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);

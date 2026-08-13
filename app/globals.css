@@ -952,9 +952,38 @@ body {
 /* ---------- Input bar ---------- */
 .input-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 14px 14px 16px;
   border-top: 1px solid var(--border);
+}
+
+.edit-banner {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 12px;
+}
+
+.edit-banner .edit-cancel {
+  padding: 2px 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--brand);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.edit-banner .edit-cancel:hover {
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
 }
 
 .input-bar input,
