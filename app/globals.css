@@ -368,6 +368,9 @@ body.resizing {
   .drag-handle {
     display: none;
   }
+  .chat {
+    min-width: 0;
+  }
 }
 
 /* ---------- Session panel ---------- */
@@ -818,6 +821,11 @@ body.resizing {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 参考 Trae：中间内容区限制阅读宽度上下限，超宽时在轨道内居中 */
+  width: 100%;
+  max-width: 960px;
+  min-width: 480px;
+  margin: 0 auto;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-card);

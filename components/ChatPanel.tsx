@@ -207,7 +207,8 @@ export function ChatPanel() {
         leftWRef.current = l;
         setLeftW(l);
       }
-      if (Number.isFinite(r) && r >= 240 && r <= 520) {
+      // 右侧边栏不设上限：仅保留最小宽度 240，最多允许拖到 1200
+      if (Number.isFinite(r) && r >= 240 && r <= 1200) {
         rightWRef.current = r;
         setRightW(r);
       }
@@ -222,7 +223,8 @@ export function ChatPanel() {
     const startX = e.clientX;
     const startW = which === "left" ? leftWRef.current : rightWRef.current;
     const min = which === "left" ? 160 : 240;
-    const max = which === "left" ? 380 : 520;
+    // 右栏不设上限（允许拖到 1200），左栏保持 160-380
+    const max = which === "left" ? 380 : 1200;
     document.body.classList.add("resizing");
     const onMove = (ev: MouseEvent) => {
       const delta = ev.clientX - startX;
