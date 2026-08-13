@@ -142,11 +142,11 @@ export function ChatPanel() {
   const [msgSelected, setMsgSelected] = useState<Set<number>>(new Set());
   /** 消息编辑：正在编辑的用户消息索引（-1 表示非编辑态） */
   const [editingIndex, setEditingIndex] = useState(-1);
-  /** 侧栏宽度（可拖拽调宽，持久化到 localStorage） */
+  /** 侧栏宽度（可拖拽调宽，持久化到 localStorage）：左栏 160-380，中间聊天区 480-960 */
   const [leftW, setLeftW] = useState(220);
-  const [rightW, setRightW] = useState(300);
+  const [midW, setMidW] = useState(720);
   const leftWRef = useRef(220);
-  const rightWRef = useRef(300);
+  const midWRef = useRef(720);
   /** todo 拖拽：记录被拖动的项 id */
   const todoDragRef = useRef<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -202,42 +202,58 @@ export function ChatPanel() {
   useEffect(() => {
     try {
       const l = Number(localStorage.getItem("prysm-sidebar-left"));
-      const r = Number(localStorage.getItem("prysm-sidebar-right"));
+      const m = Number(localStorage.getItem("prysm-sidebar-mid"));
       if (Number.isFinite(l) && l >= 160 && l <= 380) {
         leftWRef.current = l;
         setLeftW(l);
       }
-      // 右侧边栏不设上限：仅保留最小宽度 240，最多允许拖到 1200
-      if (Number.isFinite(r) && r >= 240 && r <= 1200) {
-        rightWRef.current = r;
-        setRightW(r);
+      // 中间聊天区可拖 480-960；右侧栏自动补齐剩余空间
+      if (Number.isFinite(m) && m >= 480 && m <= 960) {
+        midWRef.current = m;
+        setMidW(m);
       }
     } catch {
       /* 忽略 */
     }
   }, []);
 
-  /** 侧栏拖拽调宽：左栏拖动向右增宽，右栏拖动向左增宽（宽度范围持久化） */
-  const startResize = useCallback((which: "left" | "right") => (e: ReactMouseEvent) => {
+  // 视口缩小时收缩中间聊天区，避免把右栏挤出可读范围
+  useEffect(() => {
+    const onResize = () => {
+      const maxMid = Math.max(
+        480,
+        window.innerWidth - leftWRef.current - 200 - 16 * 2 - 40,
+      );
+      if (midWRef.current > maxMid) {
+        midWRef.current = maxMid;
+        setMidW(maxMid);
+      }
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  /** 侧栏拖拽调宽：左栏 / 中间聊天区拖动向右增宽；右栏自动补齐剩余（宽度范围持久化） */
+  const startResize = useCallback((which: "left" | "mid") => (e: ReactMouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
-    const startW = which === "left" ? leftWRef.current : rightWRef.current;
-    const min = which === "left" ? 160 : 240;
-    // 右栏不设上限（允许拖到 1200），左栏保持 160-380
-    const max = which === "left" ? 380 : 1200;
+    const startW = which === "left" ? leftWRef.current : midWRef.current;
+    const min = which === "left" ? 160 : 480;
+    // 中间区上限 960，同时保证右栏至少 200px（视口内可用空间）
+    const max =
+      which === "left"
+        ? 380
+        : Math.max(min, Math.min(960, window.innerWidth - leftWRef.current - 200 - 16 * 2 - 40));
     document.body.classList.add("resizing");
     const onMove = (ev: MouseEvent) => {
       const delta = ev.clientX - startX;
-      const w = Math.min(
-        Math.max(which === "left" ? startW + delta : startW - delta, min),
-        max,
-      );
+      const w = Math.min(Math.max(startW + delta, min), max);
       if (which === "left") {
         leftWRef.current = w;
         setLeftW(w);
       } else {
-        rightWRef.current = w;
-        setRightW(w);
+        midWRef.current = w;
+        setMidW(w);
       }
     };
     const onUp = () => {
@@ -246,7 +262,7 @@ export function ChatPanel() {
       document.body.classList.remove("resizing");
       try {
         localStorage.setItem("prysm-sidebar-left", String(leftWRef.current));
-        localStorage.setItem("prysm-sidebar-right", String(rightWRef.current));
+        localStorage.setItem("prysm-sidebar-mid", String(midWRef.current));
       } catch {
         /* 隐私模式忽略 */
       }
@@ -1461,7 +1477,7 @@ export function ChatPanel() {
         style={
           {
             "--left-w": `${leftW}px`,
-            "--right-w": `${rightW}px`,
+            "--mid-w": `${midW}px`,
           } as React.CSSProperties
         }
       >
@@ -2087,7 +2103,7 @@ export function ChatPanel() {
 
         <div
           className="drag-handle drag-right"
-          onMouseDown={startResize("right")}
+          onMouseDown={startResize("mid")}
           aria-hidden="true"
         />
         <aside className="panel">

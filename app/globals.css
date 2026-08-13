@@ -292,8 +292,8 @@ body {
 .app-main {
   flex: 1;
   display: grid;
-  /* 侧栏宽度由拖拽手柄调节（CSS 变量，ChatPanel 内联设置） */
-  grid-template-columns: var(--left-w, 220px) 1fr var(--right-w, 300px);
+  /* 左栏、中间聊天区可拖拽调宽（CSS 变量，ChatPanel 内联设置）；右栏自动补齐剩余空间，不设上限 */
+  grid-template-columns: var(--left-w, 220px) minmax(0, var(--mid-w, 720px)) minmax(200px, 1fr);
   gap: 16px;
   min-height: 0;
   padding: 20px 0;
@@ -336,8 +336,9 @@ body.resizing .drag-handle::after {
 }
 
 .drag-right {
-  right: var(--right-w, 300px);
-  margin-right: -9px;
+  /* 手柄落在左栏右缘 + 中间区宽度 + 间距处，拖动即调整中间聊天区宽度 */
+  left: calc(var(--left-w, 220px) + var(--mid-w, 720px) + 16px);
+  margin-left: -9px;
 }
 
 body.resizing {
@@ -345,14 +346,15 @@ body.resizing {
   user-select: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .app-main {
-    grid-template-columns: 1fr var(--right-w, 300px);
+    grid-template-columns: minmax(0, 1fr) 300px;
   }
   .session-panel {
     display: none;
   }
-  .drag-left {
+  .drag-left,
+  .drag-right {
     display: none;
   }
 }
@@ -821,11 +823,9 @@ body.resizing {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* 参考 Trae：中间内容区限制阅读宽度上下限，超宽时在轨道内居中 */
+  /* 宽度由 --mid-w 列控制（可拖 480-960），铺满整列与左右栏连成一片 */
   width: 100%;
-  max-width: 960px;
-  min-width: 480px;
-  margin: 0 auto;
+  min-width: 0;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-card);
