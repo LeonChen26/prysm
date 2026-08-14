@@ -123,8 +123,18 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (obj: unknown) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      // 流关闭后 bus 回调仍可能触发（如计划在客户端断开后被审批），此时 enqueue 会抛
+      // "Invalid state: Controller is already closed"。用 closed 标记 + try/catch 守卫，
+      // 关闭后静默忽略后续事件，避免未捕获异常中断审批/计划落库。
+      let closed = false;
+      const send = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
 
       // 首个事件：告知前端实际使用的会话
       send({ type: "session", sessionId: session.id, title: session.title });

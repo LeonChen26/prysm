@@ -74,6 +74,102 @@ async function main() {
   if (escaped.ok || escaped.reason !== "outside") fail("越界未拦截");
   console.log("  ✓ 多根解析 + 越界拦截正常");
 
+  console.log("== resolveInWorkdir 符号链接沙箱绕过防护 ==");
+  // 在默认工作区内创建一个符号链接，指向一个不在任何工作区根内的外部目录
+  const outsideDir = path.join(base, "outside-ws");
+  fs.mkdirSync(outsideDir, { recursive: true });
+  fs.writeFileSync(path.join(outsideDir, "secret.txt"), "SENSITIVE DATA");
+  const defaultWorkDir = paths.AGENT_WORKDIR;
+  fs.mkdirSync(defaultWorkDir, { recursive: true });
+  const symlinkInWorkdir = path.join(defaultWorkDir, "link-to-outside");
+  let dirSymlinkCreated = false;
+  try {
+    fs.symlinkSync(outsideDir, symlinkInWorkdir, "junction");
+    dirSymlinkCreated = true;
+  } catch {
+    // Windows 非管理员可能无法创建 junction，回退到 dir symlink（也不保证成功）；
+    // 再失败就跳过 symlink 子测试（此断言块仅在支持 symlink 的环境才有意义）
+    try {
+      fs.symlinkSync(outsideDir, symlinkInWorkdir, "dir");
+      dirSymlinkCreated = true;
+    } catch {
+      console.log("  ⊘ 当前环境不支持创建目录符号链接，跳过 symlink 防护断言");
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  }
+
+  if (dirSymlinkCreated) {
+    // 尝试通过符号链接访问 secret.txt —— 必须被拦截为 outside
+    const viaSymlink = paths.resolveInWorkdir("link-to-outside/secret.txt");
+    if (viaSymlink.ok) {
+      fail(`符号链接绕过沙箱：解析结果 ok=true，path=${viaSymlink.path}`);
+    }
+    if (viaSymlink.reason !== "outside") {
+      fail(`符号链接绕过沙箱：reason 应为 outside，实际 ${viaSymlink.reason}`);
+    }
+    console.log(`  ✓ 通过符号链接访问外部被拦截（reason=${viaSymlink.reason}）`);
+
+    // 场景 2：指向已授权但"非当前所属工作区"的其他根（不属于当前 root，
+    // 但全局看是工作区内目录）—— 必须重新校验：解析到的真实路径是否在授权根内。
+    // 本场景：默认工作区中 symlink -> extra1（已授权）。realpath 属于 extra1 工作区，
+    // extra1 已授权，应该 ok（不应误拦截）。
+    const symlinkToAuthorized = path.join(defaultWorkDir, "link-to-extra1");
+    try {
+      fs.symlinkSync(extra1, symlinkToAuthorized, "junction");
+    } catch {
+      try {
+        fs.symlinkSync(extra1, symlinkToAuthorized, "dir");
+      } catch {
+        /* ignore */
+      }
+    }
+    if (fs.existsSync(symlinkToAuthorized)) {
+      fs.writeFileSync(path.join(extra1, "hello.txt"), "hi");
+      const crossLink = paths.resolveInWorkdir("link-to-extra1/hello.txt");
+      if (!crossLink.ok) {
+        fail(`已授权跨根符号链接被误拦截：reason=${crossLink.reason}`);
+      }
+      if (!crossLink.path.startsWith(extra1 + path.sep)) {
+        fail(`跨根 symlink 解析结果应落到 extra1 实际路径，实际 ${crossLink.path}`);
+      }
+      console.log("  ✓ 指向已授权其他工作区的符号链接正常放行");
+      fs.rmSync(symlinkToAuthorized, { recursive: false, force: true });
+    }
+
+    // 清理目录 symlink
+    fs.rmSync(symlinkInWorkdir, { recursive: false, force: true });
+  }
+
+  // 场景 3：指向工作区外的文件符号链接（而非目录）。secret.txt 位于 outsideDir，
+  // 在默认工作区内建一个指向它的 file symlink，read 必须被拦截
+  {
+    const outsideFile = path.join(outsideDir, "secret.txt");
+    if (!fs.existsSync(outsideFile)) {
+      fs.mkdirSync(outsideDir, { recursive: true });
+      fs.writeFileSync(outsideFile, "SENSITIVE DATA");
+    }
+    const fileSymlink = path.join(defaultWorkDir, "secret-link.txt");
+    let fileSymlinkCreated = false;
+    try {
+      fs.symlinkSync(outsideFile, fileSymlink, "file");
+      fileSymlinkCreated = true;
+    } catch {
+      /* ignore: symlink not supported */
+    }
+    if (fileSymlinkCreated) {
+      const viaFileLink = paths.resolveInWorkdir("secret-link.txt");
+      if (viaFileLink.ok) {
+        fail(`文件符号链接绕过沙箱：path=${viaFileLink.path}`);
+      }
+      console.log(`  ✓ 通过文件符号链接访问外部被拦截（reason=${viaFileLink.reason}）`);
+      fs.rmSync(fileSymlink, { force: true });
+    }
+  }
+
+  // 清理 outsideDir
+  fs.rmSync(outsideDir, { recursive: true, force: true });
+  console.log("  ✓ 符号链接沙箱防护断言完成");
+
   console.log("== workdir 多根浏览 ==");
   const workdir = await import("../../lib/workdir");
   await fs.promises.writeFile(path.join(extra1, "hello.md"), "# hi");

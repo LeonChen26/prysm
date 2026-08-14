@@ -264,16 +264,25 @@ function matchesToolName(rules: Set<string>, name: string): boolean {
   return false;
 }
 
-/** run_bash 命令是否命中放行前缀（取首行，按整词边界匹配） */
+/**
+ * 检测命令中是否含复合/多语句语法（换行、命令链、子 shell 等）。
+ * 这类命令的副作用无法通过"首行前缀"完整覆盖，为安全起见一律不自动放行，走人工审批。
+ */
+const COMPOUND_CMD_RE = /[\n\r;|&]|\$\(|\`/;
+
+/** run_bash 命令是否命中放行前缀（单条简单命令，按整词边界匹配）。
+ *  安全兜底：若命令含复合语法（换行/分号/管道/&&/||/子shell），则不自动放行，避免前缀匹配绕过。
+ */
 function matchesAllowCommand(allowCommands: string[], command: string): boolean {
-  const firstLine = command.split("\n")[0].trim();
-  if (!firstLine) return false;
+  if (COMPOUND_CMD_RE.test(command)) return false;
+  const line = command.trim();
+  if (!line) return false;
   return allowCommands.some((rule) => {
     if (!rule) return false;
     return (
-      firstLine === rule ||
-      firstLine.startsWith(rule + " ") ||
-      firstLine.startsWith(rule + "\t")
+      line === rule ||
+      line.startsWith(rule + " ") ||
+      line.startsWith(rule + "\t")
     );
   });
 }
