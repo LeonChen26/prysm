@@ -168,7 +168,7 @@ npm run electron:dev     # 编译主进程/preload 并启动桌面应用
 
 ```bash
 npm run build
-npm start          # 生产模式，默认 http://localhost:3000
+npm start          # 生产模式，默认 http://localhost:30123
 ```
 
 ### standalone 产物部署（推荐用于 ECS / 容器）
@@ -178,7 +178,7 @@ npm start          # 生产模式，默认 http://localhost:3000
 ```bash
 npm run build
 cd .next/standalone
-node server.js     # 默认 3000 端口，可用 PORT / HOSTNAME 覆盖
+node server.js     # 默认 30123 端口，可用 PORT / HOSTNAME 覆盖
 ```
 
 部署到服务器时建议用 `pm2` 等进程守护：

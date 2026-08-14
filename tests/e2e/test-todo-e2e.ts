@@ -23,7 +23,7 @@ interface SseEvent {
 }
 
 async function main() {
-  const res = await fetch("http://localhost:3000/api/agent", {
+  const res = await fetch("http://localhost:30123/api/agent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -71,7 +71,7 @@ async function main() {
         case "approval_required":
           // 模拟用户在浏览器点击"允许"
           approvalsHandled++;
-          fetch("http://localhost:3000/api/agent/approve", {
+          fetch("http://localhost:30123/api/agent/approve", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: ev.id, approve: true }),

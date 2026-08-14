@@ -24,7 +24,7 @@ async function main() {
   await fs.writeFile(path.join(testDir, "b.txt"), "内容B beta", "utf-8");
   await fs.writeFile(path.join(testDir, "c.txt"), "内容C gamma", "utf-8");
 
-  const res = await fetch("http://localhost:3000/api/agent", {
+  const res = await fetch("http://localhost:30123/api/agent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -63,7 +63,7 @@ async function main() {
       if (ev.type === "delta") reply += ev.delta ?? "";
       if (ev.type === "error") errorMsg = ev.message ?? "未知错误";
       if (ev.type === "approval_required") {
-        fetch("http://localhost:3000/api/agent/approve", {
+        fetch("http://localhost:30123/api/agent/approve", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: ev.id, approve: true }),

@@ -8,7 +8,7 @@ import { AGENT_WORKDIR } from "../../lib/tools";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const BASE = "http://localhost:3000";
+const BASE = "http://localhost:30123";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface SseEvent {

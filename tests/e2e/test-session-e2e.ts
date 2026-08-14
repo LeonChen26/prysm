@@ -15,7 +15,7 @@ interface SseEvent {
   message?: string;
 }
 
-const BASE = "http://localhost:3000";
+const BASE = "http://localhost:30123";
 
 async function sendMessage(sessionId: string, message: string): Promise<string> {
   const res = await fetch(`${BASE}/api/agent`, {

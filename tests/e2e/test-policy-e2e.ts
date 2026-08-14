@@ -22,7 +22,7 @@ async function main() {
     await fs.rm(path.join(AGENT_WORKDIR, p), { recursive: true, force: true });
   }
 
-  const res = await fetch("http://localhost:3000/api/agent", {
+  const res = await fetch("http://localhost:30123/api/agent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -68,7 +68,7 @@ async function main() {
       if (ev.type === "error") errorMsg = ev.message ?? "未知错误";
       if (ev.type === "approval_required") {
         // 自动批准（模拟用户点击）
-        fetch("http://localhost:3000/api/agent/approve", {
+        fetch("http://localhost:30123/api/agent/approve", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: ev.id, approve: true }),
