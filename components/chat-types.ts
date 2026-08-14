@@ -7,6 +7,8 @@ export interface UiMessage {
   text: string;
   /** 消息时间戳（毫秒），用于展示发送时间 */
   timestamp?: number;
+  /** 多模态（Phase 6）：消息内的图片块（base64） */
+  images?: { type: "image"; data: string; mimeType: string }[];
 }
 
 /** 工具审批结果（沉淀到工具卡片，供对话流追溯） */
@@ -97,6 +99,31 @@ export const RISK_LABELS: Record<string, string> = {
   critical: "严重",
 };
 
+/** Plan mode 步骤（Phase 7） */
+export interface PlanStep {
+  id: string;
+  title: string;
+  detail?: string;
+  tool?: string;
+  expected?: string;
+  status?: "pending" | "in_progress" | "done" | "skipped";
+}
+
+/** Plan mode 待确认卡片（Phase 7） */
+export interface PlanCard {
+  id: string;
+  surface?: string;
+  summary?: string;
+  steps: PlanStep[];
+  createdAt?: number;
+  expiresAt?: number;
+  deciding?: boolean;
+  /** 已由后端决定：approve 结果（已批准/已拒绝） */
+  decided?: boolean;
+  /** 已由后端取消 */
+  cancelled?: boolean;
+}
+
 /** 审批参数按工具格式化展示（run_bash 显示命令，文件类显示路径/内容预览） */
 export function formatApprovalArgs(toolName: string, args: unknown): string {
   if (!args || typeof args !== "object") return "";
@@ -136,6 +163,8 @@ export interface SessionInfo {
   createdAt: number;
   updatedAt: number;
   pinned?: number;
+  /** 会话形态（work/coding），Phase 1b 起由后端返回 */
+  surface?: "work" | "coding";
 }
 
 export interface SseEvent {
@@ -151,6 +180,9 @@ export interface SseEvent {
     | "approval_resolved"
     | "approval_expired"
     | "policy_notice"
+    | "plan_proposed"
+    | "plan_decided"
+    | "plan_cancelled"
     | "stopped"
     | "error"
     | "done";
@@ -172,6 +204,10 @@ export interface SseEvent {
   /** 策略拦截通知 */
   action?: string;
   reason?: string;
+  /** Plan mode：计划标题 / 步骤 / 形态 */
+  surface?: string;
+  summary?: string;
+  steps?: { id: string; title: string; detail?: string; tool?: string; expected?: string }[];
 }
 
 export interface RunStats {

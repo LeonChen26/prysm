@@ -2511,6 +2511,77 @@ body.resizing {
   opacity: 0.85;
 }
 
+/* ---------- Plan mode（Phase 7）计划卡片 ---------- */
+.plan-dock {
+  border-top: 1px solid var(--border);
+}
+
+.plan-card {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: opacity 0.15s ease;
+}
+
+.plan-card-resolved {
+  opacity: 0.7;
+}
+
+.plan-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand);
+}
+
+.plan-summary {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.plan-steps {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.plan-step-tool {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.plan-result {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.plan-result-approved {
+  color: var(--success);
+}
+
+.plan-result-rejected {
+  color: var(--danger);
+}
+
+.plan-result-cancelled {
+  color: var(--warning);
+}
+
 /* ---------- Todo plan ---------- */
 .todo-section {
   display: flex;

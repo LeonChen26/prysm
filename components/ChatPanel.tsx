@@ -36,6 +36,7 @@ import {
   toolCardStateClass,
   toolCardStateText,
   type ApprovalCard,
+  type PlanCard,
   type RunStats,
   type SessionInfo,
   type SseEvent,
@@ -87,6 +88,8 @@ export function ChatPanel() {
   const [cards, setCards] = useState<ToolCard[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [approvals, setApprovals] = useState<ApprovalCard[]>([]);
+  /** Plan mode（Phase 7）：待确认计划卡片 */
+  const [plans, setPlans] = useState<PlanCard[]>([]);
   /** 倒计时心跳（每秒 +1，驱动审批卡片剩余秒数刷新） */
   const [countdownTick, setCountdownTick] = useState(0);
   const [input, setInput] = useState("");
@@ -421,6 +424,7 @@ export function ChatPanel() {
       setCards([]);
       setTodos([]);
       setApprovals([]);
+      setPlans([]);
       setError(null);
       setMessages([]);
       setEditingIndex(-1);
@@ -462,6 +466,7 @@ export function ChatPanel() {
         setCards([]);
         setTodos([]);
         setApprovals([]);
+        setPlans([]);
         setError(null);
       }
     } catch {
@@ -480,6 +485,7 @@ export function ChatPanel() {
           setCards([]);
           setTodos([]);
           setApprovals([]);
+          setPlans([]);
           setError(null);
           if (rest.length > 0) {
             switchSession(rest[0].id);
@@ -896,6 +902,7 @@ export function ChatPanel() {
           setCards([]);
           setTodos([]);
           setApprovals([]);
+          setPlans([]);
           setError(null);
         }
         refreshSessions();
@@ -939,6 +946,7 @@ export function ChatPanel() {
       setCards([]);
       setTodos([]);
       setApprovals([]);
+      setPlans([]);
       if (appendUser) {
         setMessages((m) => [
           ...m,
@@ -1069,6 +1077,40 @@ export function ChatPanel() {
               if (ev.id) applyApprovalToCard(ev.id, "denied_auto", ev.reason);
               const label = TOOL_META[ev.toolName ?? ""]?.label ?? ev.toolName ?? "";
               showNotice(`${label} 已被策略拦截：${ev.reason ?? "命中禁止规则"}`);
+              break;
+            }
+            case "plan_proposed": {
+              const id = ev.id;
+              if (!id) break;
+              setPlans((p) => [
+                ...p,
+                {
+                  id,
+                  surface: ev.surface,
+                  summary: ev.summary,
+                  steps: ev.steps ?? [],
+                  createdAt: Date.now(),
+                  expiresAt: ev.expiresAt,
+                },
+              ]);
+              break;
+            }
+            case "plan_decided":
+            case "plan_cancelled": {
+              if (!ev.id) break;
+              setPlans((p) =>
+                p.map((item) =>
+                  item.id === ev.id
+                    ? {
+                        ...item,
+                        deciding: false,
+                        ...(ev.type === "plan_cancelled"
+                          ? { cancelled: true }
+                          : { decided: ev.approve }),
+                      }
+                    : item,
+                ),
+              );
               break;
             }
             case "stopped":
@@ -1345,6 +1387,44 @@ export function ChatPanel() {
     [approvals, decideApproval],
   );
 
+  /** 决定计划（Phase 7）：批准执行 / 拒绝 */
+  const decidePlan = useCallback(async (id: string, approve: boolean) => {
+    setPlans((p) =>
+      p.map((item) => (item.id === id ? { ...item, deciding: true } : item)),
+    );
+    try {
+      const res = await fetch("/api/plans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: approve ? "approve" : "reject" }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error ?? "计划决定失败");
+        // 失败时恢复按钮可点
+        setPlans((p) =>
+          p.map((item) =>
+            item.id === id ? { ...item, deciding: false } : item,
+          ),
+        );
+      } else {
+        // 后端会通过 plan_decided/plan_cancelled 同步状态；这里先本地标记结果
+        setPlans((p) =>
+          p.map((item) =>
+            item.id === id ? { ...item, deciding: false, decided: approve } : item,
+          ),
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setPlans((p) =>
+        p.map((item) =>
+          item.id === id ? { ...item, deciding: false } : item,
+        ),
+      );
+    }
+  }, []);
+
   /** 中断当前正在执行的任务 */
   const stop = useCallback(async () => {
     if (!sessionId) return;
@@ -1398,6 +1478,7 @@ export function ChatPanel() {
       setCards([]);
       setTodos([]);
       setApprovals([]);
+      setPlans([]);
       setError(null);
       if (remaining.length > 0) {
         switchSession(remaining[0].id);
@@ -2040,6 +2121,19 @@ export function ChatPanel() {
                     )}
                   </div>
                   <div className="message-body">
+                    {m.images && m.images.length > 0 && (
+                      <div className="msg-images">
+                        {m.images.map((img, ii) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={ii}
+                            className="msg-image"
+                            src={`data:${img.mimeType};base64,${img.data}`}
+                            alt="消息图片"
+                          />
+                        ))}
+                      </div>
+                    )}
                     {m.text ? (
                       <>
                         {fileRefs.length > 0 && (
@@ -2261,6 +2355,94 @@ export function ChatPanel() {
                           {a.deciding ? "处理中…" : "拒绝"}
                         </button>
                       </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 计划确认（Plan mode Phase 7）：固定在对话窗内、输入框上方 */}
+          {plans.length > 0 && (
+            <div className="approval-dock plan-dock">
+              <div className="approval-list">
+                {plans.map((p) => {
+                  const leftMs = p.expiresAt
+                    ? Math.max(0, p.expiresAt - Date.now())
+                    : 0;
+                  const leftSec = Math.ceil(leftMs / 1000);
+                  void countdownTick;
+                  const resolved =
+                    p.cancelled || typeof p.decided === "boolean";
+                  return (
+                    <div
+                      key={p.id}
+                      className={`plan-card ${p.deciding ? "approval-deciding" : ""} ${
+                        resolved ? "plan-card-resolved" : ""
+                      }`}
+                    >
+                      <div className="approval-title">
+                        <span className="plan-badge">计划</span>
+                        <span className="approval-tool">
+                          {p.surface ? `形态度量：${p.surface}` : "待确认计划"}
+                        </span>
+                        {!resolved && p.expiresAt && (
+                          <span
+                            className={`approval-countdown ${
+                              leftSec <= 10 ? "approval-countdown-urgent" : ""
+                            }`}
+                          >
+                            {leftSec}s
+                          </span>
+                        )}
+                      </div>
+                      {p.summary && (
+                        <div className="plan-summary">{p.summary}</div>
+                      )}
+                      <ol className="plan-steps">
+                        {p.steps.map((s) => (
+                          <li key={s.id}>
+                            {s.title}
+                            {s.tool && (
+                              <span className="plan-step-tool">
+                                {TOOL_META[s.tool]?.label ?? s.tool}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                      {p.cancelled ? (
+                        <div className="plan-result plan-result-cancelled">
+                          计划已取消
+                        </div>
+                      ) : typeof p.decided === "boolean" ? (
+                        <div
+                          className={`plan-result ${
+                            p.decided
+                              ? "plan-result-approved"
+                              : "plan-result-rejected"
+                          }`}
+                        >
+                          {p.decided ? "已批准，开始执行" : "已拒绝"}
+                        </div>
+                      ) : (
+                        <div className="approval-actions">
+                          <button
+                            className="btn-approve"
+                            disabled={p.deciding}
+                            onClick={() => decidePlan(p.id, true)}
+                          >
+                            {p.deciding ? "处理中…" : "批准执行"}
+                          </button>
+                          <button
+                            className="btn-deny"
+                            disabled={p.deciding}
+                            onClick={() => decidePlan(p.id, false)}
+                          >
+                            {p.deciding ? "处理中…" : "拒绝"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

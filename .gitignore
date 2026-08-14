@@ -8,6 +8,13 @@ agent-memory.db
 sessions.db
 todo.db
 audit.db
+prysm.db
 *.log
 .DS_Store
 tsconfig.tsbuildinfo
+dist-electron/
+release/
+release-build/
+.electron-cache/
+plans.db
+*.db
