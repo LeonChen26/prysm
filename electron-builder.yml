@@ -1,0 +1,57 @@
+# Prysm 打包配置（electron-builder）
+# 本机默认产出 Windows 安装包；Mac/Linux 需在对应系统上构建。
+appId: com.prysm.app
+productName: Prysm
+copyright: Copyright © 2026 Prysm
+
+directories:
+  output: release-build
+  buildResources: electron
+
+# 复用本机已下载的 Electron 发行版，避免 electron-builder 重新下载到系统缓存（沙箱/离线环境可用）
+electronDist: node_modules/electron/dist
+
+# 主进程已由 esbuild 打包为自包含 ESM，仅需 dist-electron + 元数据
+files:
+  - dist-electron/**
+  - package.json
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: Prysm-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Prysm
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  category: public.app-category.developer-tools
+  artifactName: Prysm-${version}-${arch}.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Development
+  artifactName: Prysm-${version}-${arch}.${ext}
+
+# 自动更新发布源
+# - 默认使用 GitHub Releases（从 git remote 自动推断 owner/repo）
+# - 运行时可通过 PRYSM_UPDATE_URL 环境变量覆盖为自建静态服务器
+# 发布命令：GH_TOKEN=ghp_xxx npm run release:github
+publish:
+  - provider: github
+    owner: LeonChen26
+    repo: prysm
+    releaseType: draft
