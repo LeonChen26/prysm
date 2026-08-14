@@ -8,6 +8,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { DiffView, isDiffText } from "./DiffView";
 
 /** 工作区文件浏览器图标（SVG，随主题着色） */
 export const WbFolderIcon = () => (
@@ -168,7 +169,7 @@ export function MermaidDiagram({ code }: { code: string }) {
   );
 }
 
-/** Markdown 代码块：hover 显示复制按钮；```thinking 语言渲染为折叠的思考块；```mermaid 渲染流程图 */
+/** Markdown 代码块：hover 显示复制按钮；```thinking 语言渲染为折叠的思考块；```mermaid 渲染流程图；unified diff 内容渲染为高亮 DiffView */
 export function CodeBlock({ children }: { children?: ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
@@ -184,6 +185,12 @@ export function CodeBlock({ children }: { children?: ReactNode }) {
   const isMermaid =
     !!childProps && /language-mermaid/i.test(String(childProps.className ?? ""));
   if (isMermaid) return <MermaidDiagram code={nodeToText(children)} />;
+  // 正文代码块若为 unified diff，渲染为高亮视图（新增绿/删除红/hunk 蓝）
+  // 注意：rehype-highlight 会自动给 diff 内容加 language-diff/hljs 类（但未加载主题 CSS，仍是黑底白字），
+  // 故按内容而非语言类判断，命中即用 DiffView 接管。
+  if (isDiffText(nodeToText(children).replace(/\n$/, ""))) {
+    return <DiffView text={nodeToText(children)} />;
+  }
   const copy = async () => {
     if (!ref.current) return;
     try {

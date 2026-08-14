@@ -3526,6 +3526,56 @@ body.resizing {
   overflow-y: auto;
 }
 
+/* ---------- Diff 高亮展示（edit_file 等工具结果） ---------- */
+.diff-view {
+  padding: 8px 0;
+  color: var(--text-secondary);
+  max-height: 260px;
+}
+
+.diff-line {
+  display: flex;
+  align-items: flex-start;
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-line::before {
+  content: attr(data-mark);
+  flex-shrink: 0;
+  width: 1.4em;
+  font-weight: 700;
+  opacity: 0.75;
+  user-select: none;
+}
+
+.diff-add {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: color-mix(in srgb, var(--success) 85%, var(--text-secondary));
+}
+
+.diff-del {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: color-mix(in srgb, var(--danger) 85%, var(--text-secondary));
+}
+
+.diff-hunk {
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.diff-file-old {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.diff-file-new {
+  color: color-mix(in srgb, var(--success) 80%, var(--text-secondary));
+  font-weight: 600;
+}
+
 .card-badge {
   flex-shrink: 0;
   font-size: 10px;
