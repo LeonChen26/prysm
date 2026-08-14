@@ -49,6 +49,56 @@ export const WbChevron = () => (
   </svg>
 );
 
+/** 品牌火花图标（AI 标识：大星 + 小星，Claude 式双子星，随当前颜色着色） */
+export const SparkleIcon = ({ size = 14 }: { size?: number }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width={size}
+    height={size}
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <path d="M12 2.5c.55 2.6 2.15 4.2 4.75 4.75C14.15 7.8 12.55 9.4 12 12c-.55-2.6-2.15-4.2-4.75-4.75C9.85 6.7 11.45 5.1 12 2.5z" />
+    <path d="M19 12.5c.35 1.7 1.4 2.75 3.1 3.1-1.7.35-2.75 1.4-3.1 3.1-.35-1.7-1.4-2.75-3.1-3.1 1.7-.35 2.75-1.4 3.1-3.1z" />
+  </svg>
+);
+
+/** 用户人形图标（消息角色标识） */
+export const PersonIcon = ({ size = 14 }: { size?: number }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width={size}
+    height={size}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.9"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <circle cx="12" cy="8" r="3.6" />
+    <path d="M5 20a7 7 0 0 1 14 0" />
+  </svg>
+);
+
+/** 品牌几何棱镜：呼应 Prysm（prism）命名，三角形棱镜 + 内部光线 */
+export const PrismIcon = ({ size = 14 }: { size?: number }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width={size}
+    height={size}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.9"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M12 3 21 19 3 19Z" />
+    <path d="M6.8 14.2 12 8l5.2 6.2" />
+  </svg>
+);
+
 /** 递归提取 React 节点文本（用于代码块语言内容） */
 export function nodeToText(node: ReactNode): string {
   if (node == null || typeof node === "boolean") return "";

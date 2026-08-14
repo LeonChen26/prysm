@@ -21,6 +21,9 @@ import {
   CodeBlock,
   extractFileRefs,
   FileRefCards,
+  PersonIcon,
+  PrismIcon,
+  SparkleIcon,
   WbChevron,
   WbFileIcon,
   WbFolderIcon,
@@ -1784,13 +1787,10 @@ export function ChatPanel() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="traffic-lights" aria-hidden="true">
-          <span className="tl tl-red" />
-          <span className="tl tl-yellow" />
-          <span className="tl tl-green" />
-        </div>
         <div className="brand">
-          <span className="brand-dot" />
+          <span className="brand-dot">
+            <PrismIcon size={16} />
+          </span>
           <h1>Prysm</h1>
         </div>
         <div className="surface-switch">
@@ -1806,10 +1806,6 @@ export function ChatPanel() {
           >
             Coding
           </button>
-        </div>
-        <div className={`status ${busy ? "status-busy" : ""}`}>
-          <span className="status-dot" />
-          {busy ? "正在执行任务…" : "空闲"}
         </div>
         <button
           className={`panel-toggle ${panelCollapsed ? "panel-collapsed" : ""}`}
@@ -2489,9 +2485,9 @@ export function ChatPanel() {
                   )}
                   <div className="message-role" aria-hidden={!groupEnd}>
                     {m.role === "user" ? (
-                      <span aria-hidden="true">●</span>
+                      <PersonIcon size={15} />
                     ) : (
-                      <span aria-hidden="true">✦</span>
+                      <SparkleIcon size={15} />
                     )}
                   </div>
                   <div className="message-body">
