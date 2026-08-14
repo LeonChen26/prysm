@@ -1,6 +1,7 @@
 import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { consumeStopped, generateTitle, logRun } from "@/lib/agent";
+import { judgeRun } from "@/lib/judge";
 import { setPlanCtx } from "@/lib/tools";
 import { rememberMessages } from "@/lib/memory";
 import { createCore } from "@/lib/core";
@@ -234,7 +235,7 @@ export async function POST(req: Request) {
           console.error("[session] 持久化失败:", err);
         }
         // 运行日志（持久化到 insights.db，供前端查看最近执行记录与观测统计）
-        logRun({
+        const runRec = logRun({
           sessionId: session.id,
           title: session.title,
           startedAt: runStartedAt,
@@ -250,6 +251,17 @@ export async function POST(req: Request) {
                 : String(runError)
               : undefined,
         });
+        // LLM-as-Judge 自动评分（默认关闭，PRYSM_LLM_JUDGE=1 启用；fire-and-forget，不影响响应）
+        try {
+          const userMsg = msgs.find((m) => m.role === "user");
+          const replyMsg = [...msgs].reverse().find((m) => m.role === "assistant");
+          void judgeRun(runRec, {
+            userText: userMsg ? contentText(userMsg.content) : undefined,
+            replyText: replyMsg ? contentText(replyMsg.content) : undefined,
+          });
+        } catch (err) {
+          console.error("[judge] 触发失败:", err);
+        }
         // 阶段 4：把消息写入情景记忆（按内容去重，恢复的历史不会重复写入）
         try {
           const stored = rememberMessages(a.state.messages);

@@ -187,11 +187,11 @@ export interface RunLogEntry {
   };
 }
 
-/** 记录一次 Agent 运行（持久化到 insights.db，替代内存数组） */
+/** 记录一次 Agent 运行（持久化到 insights.db，替代内存数组），返回落库记录（含 id，供关联评分） */
 export function logRun(
   entry: Omit<RunLogEntry, "id"> & { userText?: string; model?: string },
-): void {
-  recordRun(entry);
+): RunLogEntry {
+  return recordRun(entry);
 }
 
 /** 最近运行日志（新在前，从 insights.db 读） */

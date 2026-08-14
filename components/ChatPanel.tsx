@@ -221,6 +221,7 @@ const RULE_SCORE_LABELS: Record<string, string> = {
   run_error: "运行错误",
   run_stopped: "手动停止",
   no_tools: "未用工具",
+  llm_judge: "AI 评分",
 };
 
 /** Work 形态空会话模板（办公任务）：点击即创建对应任务的会话并立即发起 */
@@ -3831,9 +3832,15 @@ export function ChatPanel() {
                                   {rules.map((r) => (
                                     <span
                                       key={r.id}
-                                      className="insight-score insight-score-rule"
+                                      className={`insight-score ${
+                                        r.label === "llm_judge"
+                                          ? "insight-score-ai"
+                                          : "insight-score-rule"
+                                      }`}
                                     >
-                                      {RULE_SCORE_LABELS[r.label] ?? r.label}
+                                      {r.label === "llm_judge"
+                                        ? `AI 评分 ${r.score != null ? r.score + "/10" : "?"}`
+                                        : (RULE_SCORE_LABELS[r.label] ?? r.label)}
                                     </span>
                                   ))}
                                 </div>

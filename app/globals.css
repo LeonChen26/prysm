@@ -2904,6 +2904,11 @@ body.resizing {
   color: var(--warning);
 }
 
+.insight-score-ai {
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand);
+}
+
 .insight-error {
   margin-top: 5px;
   font-size: 10px;
