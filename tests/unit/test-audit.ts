@@ -14,6 +14,13 @@ function fail(msg: string): never {
   throw new Error(msg);
 }
 
+function expectEq(name: string, actual: unknown, want: unknown) {
+  if (actual !== want) {
+    fail(`${name}: 期望 ${JSON.stringify(want)}，实际 ${JSON.stringify(actual)}`);
+  }
+  console.log(`  ✓ ${name}`);
+}
+
 async function main() {
   clearApprovals();
   console.log("== 审批历史审计 ==");
@@ -85,6 +92,52 @@ async function main() {
   if (red.includes("sk-live-1234567890")) fail("命令内嵌密钥串未脱敏");
   if (red.includes("p@ss")) fail("嵌套 password 未脱敏");
   if (!red.includes("[redacted]")) fail("应包含 [redacted] 占位");
+
+  console.log("\n== 审计筛选：按 tool 名称 ==");
+  // 先构造已知数据（清空后写入）
+  clearApprovals();
+  const pA1 = requestApproval({ id: "fA1", toolName: "write_file", args: { path: "a.txt" } }, 5000);
+  resolveApproval("fA1", true);
+  await pA1;
+  const pA2 = requestApproval({ id: "fA2", toolName: "write_file", args: { path: "b.txt" } }, 5000);
+  resolveApproval("fA2", false);
+  await pA2;
+  const pA3 = requestApproval({ id: "fA3", toolName: "run_bash", args: { command: "ls" } }, 5000);
+  resolveApproval("fA3", true);
+  await pA3;
+  const onlyWrite = listApprovals(10, { tool: "write_file" });
+  const allTools = listApprovals(10);
+  console.log(`  全量 ${allTools.length} 条，其中 write_file ${onlyWrite.length} 条`);
+  if (onlyWrite.length !== 2) fail(`按 tool 筛选 write_file 应得 2 条，实际 ${onlyWrite.length}`);
+  if (!onlyWrite.every((r) => r.toolName === "write_file")) fail("write_file 筛选结果不纯");
+  expectEq("按 tool 计数 countApprovals", countApprovals({ tool: "write_file" }), 2);
+  expectEq("按 tool=run_bash 计数", countApprovals({ tool: "run_bash" }), 1);
+  expectEq("全量计数（无筛选）", countApprovals(), 3);
+
+  console.log("\n== 审计筛选：按 action 动作 ==");
+  const deniedOnly = listApprovals(10, { action: "denied" });
+  const approvedOnly = listApprovals(10, { action: "approved" });
+  expectEq("按 action=denied 条数", deniedOnly.length, 1);
+  expectEq("按 action=approved 条数", approvedOnly.length, 2);
+  expectEq("按 action=timeout 条数（当前记录无）", countApprovals({ action: "timeout" }), 0);
+
+  console.log("\n== 审计筛选：tool + action 联合 ==");
+  const writeApproved = listApprovals(10, { tool: "write_file", action: "approved" });
+  expectEq("write_file + approved 联合筛选条数", writeApproved.length, 1);
+  expectEq("联合计数", countApprovals({ tool: "write_file", action: "approved" }), 1);
+
+  console.log("\n== 审计分页：limit 与 offset ==");
+  const allAsc = listApprovals(10).reverse(); // 老在前
+  // 写入顺序：fA1(write, approved) → fA2(write, denied) → fA3(run, approved)
+  // listApprovals 新在前：顺序 fA3, fA2, fA1
+  const page1 = listApprovals(2, {}); // 前 2 条（最新两条）
+  const page2 = listApprovals(2, { offset: 2 }); // 跳过 2 取后面
+  expectEq("page1 size=limit=2", page1.length, 2);
+  expectEq("page1[0] 最新 = fA3", page1[0].toolName + ":" + page1[0].action, "run_bash:approved");
+  expectEq("page1[1] = fA2", page1[1].toolName + ":" + page1[1].action, "write_file:denied");
+  expectEq("page2 至少 1 条（offset=2 后剩 fA1）", page2.length >= 1, true);
+  expectEq("page2[0] = fA1（最老）", page2[0].toolName + ":" + page2[0].action, "write_file:approved");
+  expectEq("offset 超出返回空数组", listApprovals(10, { offset: 999 }).length, 0);
 
   const removed = clearApprovals();
   console.log("清空:", removed, "| 剩余:", countApprovals());

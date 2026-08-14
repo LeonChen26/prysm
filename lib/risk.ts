@@ -12,6 +12,16 @@
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
+/** 工具来源（Phase 2 起影响默认风险等级）：core=内置 / mcp / skill / subagent */
+export type ToolSource = "core" | "mcp" | "skill" | "subagent";
+
+/** 从工具名推断来源（Phase 2/3）：mcp__* → mcp，skill__* → skill，其余 core */
+export function toolSource(toolName: string): ToolSource {
+  if (toolName.startsWith("mcp__")) return "mcp";
+  if (toolName.startsWith("skill__")) return "skill";
+  return "core";
+}
+
 export const RISK_ORDER: Record<RiskLevel, number> = {
   low: 0,
   medium: 1,
@@ -37,6 +47,22 @@ const TOOL_BASE_RISK: Record<string, RiskLevel> = {
   delete_file: "high",
   run_bash: "medium",
 };
+
+/** 未在基础表时按来源给的默认等级（Phase 2；外部来源默认 medium，核心未知工具默认 low） */
+const SOURCE_BASE_RISK: Record<ToolSource, RiskLevel> = {
+  core: "low",
+  mcp: "medium",
+  skill: "medium",
+  subagent: "medium",
+};
+
+/** 基础风险：优先工具表，其次按来源给默认 */
+function baseRisk(toolName: string, source?: ToolSource): RiskLevel {
+  return (
+    TOOL_BASE_RISK[toolName] ??
+    (source ? SOURCE_BASE_RISK[source] : "low")
+  );
+}
 
 /** run_bash 危险命令规则：按数组顺序匹配，越靠前越危险 */
 const COMMAND_RULES: { level: RiskLevel; re: RegExp; label: string }[] = [
@@ -90,9 +116,14 @@ function getArgs(args: unknown): Record<string, unknown> {
 /**
  * 评估一次敏感工具调用的风险。
  * 返回等级与首个命中原因；未命中任何规则时仅返回基础等级。
+ * @param source 工具来源（Phase 2）：core/mcp/skill/subagent，影响未登记工具的默认等级
  */
-export function assessRisk(toolName: string, args: unknown): RiskAssessment {
-  let level = TOOL_BASE_RISK[toolName] ?? "low";
+export function assessRisk(
+  toolName: string,
+  args: unknown,
+  source?: ToolSource,
+): RiskAssessment {
+  let level = baseRisk(toolName, source);
   let reason: string | undefined;
   let matched: string | undefined;
 

@@ -13,6 +13,8 @@
 
 import { logApproval } from "./audit";
 import type { RiskLevel } from "./risk";
+import { getApprovalTimeoutMs } from "./config";
+import { getPolicyApprovalTimeoutMs } from "./policy";
 
 export interface ApprovalRequest {
   id: string;
@@ -58,8 +60,6 @@ const pending = new Map<string, PendingEntry>();
 const listeners = new Set<(req: ApprovalRequest) => void>();
 const lifecycleListeners = new Set<(e: ApprovalLifecycleEvent) => void>();
 
-export const APPROVAL_TIMEOUT_MS = Number(process.env.APPROVAL_TIMEOUT_MS ?? 120000);
-
 /** 注册"新审批请求"订阅（兼容旧用法），返回取消函数 */
 export function subscribeApprovals(listener: (req: ApprovalRequest) => void): () => void {
   listeners.add(listener);
@@ -84,14 +84,17 @@ function notifyLifecycle(e: ApprovalLifecycleEvent): void {
 /**
  * 发起一次审批请求，阻塞直到用户确认或超时（超时视为拒绝）。
  * 返回 Promise<boolean>：true=同意放行，false=拒绝/超时。
+ * 超时优先级：参数 > policy 表（approval_timeout_ms）> config > env > 默认 120s。
  */
 export function requestApproval(
   req: ApprovalRequest,
-  timeoutMs = APPROVAL_TIMEOUT_MS,
+  timeoutMs?: number,
 ): Promise<boolean> {
   return new Promise((resolve) => {
+    const effectiveTimeout =
+      timeoutMs ?? getPolicyApprovalTimeoutMs() ?? getApprovalTimeoutMs();
     const createdAt = Date.now();
-    const expiresAt = createdAt + timeoutMs;
+    const expiresAt = createdAt + effectiveTimeout;
     const state: ApprovalState = {
       ...req,
       status: "pending",
@@ -107,7 +110,7 @@ export function requestApproval(
       state.status = "timeout";
       notifyLifecycle({ type: "expired", state });
       resolve(false);
-    }, timeoutMs);
+    }, effectiveTimeout);
     pending.set(req.id, { req, resolver: resolve, createdAt, expiresAt });
     notifyLifecycle({ type: "required", state });
   });

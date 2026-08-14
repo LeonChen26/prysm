@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { messageText } from "./messages";
+import { basePath, envValue } from "./config";
 
 /**
  * 情景记忆（阶段 4）
@@ -13,10 +13,10 @@ import { messageText } from "./messages";
  * 中文检索：写入时在中文字符间插空格，让 unicode61 按字符分词
  */
 
-const MEMORY_DB = path.resolve(process.cwd(), "agent-memory.db");
-
-/** 每轮检索返回的最大 episode 数 */
-export const MEMORY_RECALL_K = Number(process.env.MEMORY_RECALL_K ?? 5);
+/** 每轮检索返回的最大 episode 数（惰性读 env，支持配置注入） */
+export function memoryRecallK(): number {
+  return Number(envValue("MEMORY_RECALL_K") ?? 5);
+}
 /** 每条 episode 注入时截断的最大字符数 */
 const MAX_CHARS_PER_EPISODE = 200;
 
@@ -26,7 +26,7 @@ let lastStoredCount = 0;
 
 function getDb(): DatabaseSync {
   if (db) return db;
-  const d = new DatabaseSync(MEMORY_DB);
+  const d = new DatabaseSync(basePath("agent-memory.db"));
   d.exec(`
     CREATE TABLE IF NOT EXISTS episodes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,7 +110,7 @@ export function resetMemoryTracking(): void {
 }
 
 /** 按查询检索相关历史 episode，返回拼接文本（无结果返回空串） */
-export function retrieveEpisodes(query: string, k = MEMORY_RECALL_K): string {
+export function retrieveEpisodes(query: string, k = memoryRecallK()): string {
   const tokens = queryTokens(query);
   if (tokens.length === 0) return "";
   // OR 匹配 + BM25 排序：让包含更多关键词的 episode 排前

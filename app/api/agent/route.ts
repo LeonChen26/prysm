@@ -1,18 +1,12 @@
 import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import {
-  consumeStopped,
-  generateTitle,
-  getAgent,
-  logRun,
-  mapEvent,
-} from "@/lib/agent";
-import { subscribeApprovalLifecycle } from "@/lib/approval";
+import { consumeStopped, generateTitle, logRun } from "@/lib/agent";
+import { setPlanCtx } from "@/lib/tools";
 import { rememberMessages } from "@/lib/memory";
+import { createCore } from "@/lib/core";
+import { toImageContents, extractImages } from "@/lib/attachments";
 import {
-  createSession,
   getSession,
-  listSessions,
   renameSession,
   saveSessionMessages,
   type SessionInfo,
@@ -21,19 +15,16 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** 统一入口：注入 baseDir/env，核心模块经 config 上下文读取（Phase 1a.3） */
+const core = createCore({ baseDir: process.cwd(), env: process.env });
+
 function toUiMessage(m: AgentMessage) {
-  if (m.role === "user") {
+  if (m.role === "user" || m.role === "assistant") {
     return {
-      role: "user" as const,
+      role: m.role,
       text: contentText(m.content),
       timestamp: m.timestamp ?? 0,
-    };
-  }
-  if (m.role === "assistant") {
-    return {
-      role: "assistant" as const,
-      text: contentText(m.content),
-      timestamp: m.timestamp ?? 0,
+      images: extractImages(m.content),
     };
   }
   return null;
@@ -45,7 +36,7 @@ function resolveSession(body: { sessionId?: unknown }): SessionInfo {
     const s = getSession(body.sessionId);
     if (s) return s;
   }
-  return listSessions()[0] ?? createSession();
+  return core.listSessions()[0] ?? core.createSession();
 }
 
 /** GET /api/agent?sessionId=xxx —— 返回指定会话（默认最新）的消息历史 */
@@ -56,10 +47,10 @@ export async function GET(req: Request) {
     let session: SessionInfo | undefined = sessionId
       ? getSession(sessionId)
       : undefined;
-    if (!session) session = listSessions()[0];
+    if (!session) session = core.listSessions()[0];
     if (!session) return Response.json({ messages: [], session: null });
 
-    const agent = await getAgent(session.id);
+    const agent = await core.getAgent(session.id);
     const messages = agent.state.messages
       .map(toUiMessage)
       .filter((m): m is NonNullable<typeof m> => m !== null);
@@ -77,7 +68,12 @@ export async function GET(req: Request) {
 
 /** POST /api/agent —— 发送消息，返回 SSE 事件流 */
 export async function POST(req: Request) {
-  let body: { message?: unknown; sessionId?: unknown; rewindToText?: unknown };
+  let body: {
+    message?: unknown;
+    sessionId?: unknown;
+    rewindToText?: unknown;
+    images?: { data?: unknown; mimeType?: unknown }[];
+  };
   try {
     body = await req.json();
   } catch {
@@ -87,11 +83,16 @@ export async function POST(req: Request) {
   if (!message) {
     return Response.json({ error: "message 不能为空" }, { status: 400 });
   }
+  // 多模态（Phase 6）：透传图片块（base64 + mimeType）给模型
+  const images = (Array.isArray(body?.images) ? body.images : [])
+    .filter((img) => img && typeof img.data === "string" && img.data && typeof img.mimeType === "string")
+    .map((img) => ({ data: img.data as string, mimeType: img.mimeType as string }));
+  const imageContents = toImageContents(images);
   const session = resolveSession(body);
 
   let agent;
   try {
-    agent = await getAgent(session.id);
+    agent = await core.getAgent(session.id);
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : String(err) },
@@ -128,56 +129,27 @@ export async function POST(req: Request) {
       // 首个事件：告知前端实际使用的会话
       send({ type: "session", sessionId: session.id, title: session.title });
 
-      // 本轮工具调用统计（供运行统计概览）
+      // Phase 7.5：通信层落地 —— 核心层（agent/approval/plan）已直接 emit 到共享 AgentEventBus，
+      // 这里只做传输适配：订阅 bus，按会话隔离推送，SSE 行为不变。
+      // tool_call 统计供运行统计概览（同样来自 bus，带 sessionId）。
       const toolCalls: Record<string, number> = {};
-      const unsub = a.subscribe(async (event) => {
-        const ui = mapEvent(event);
-        if (!ui) return;
-        if (ui.type === "tool_end") {
-          toolCalls[ui.toolName] = (toolCalls[ui.toolName] ?? 0) + 1;
+      const unsubBus = core.eventBus.subscribe((event) => {
+        const sid = (event as { sessionId?: string }).sessionId;
+        if (sid && sid !== session.id) return;
+        if ((event as { type?: string }).type === "tool_end") {
+          const name = (event as { toolName?: string }).toolName;
+          if (name) toolCalls[name] = (toolCalls[name] ?? 0) + 1;
         }
-        send(ui);
-      });
-      // 审批生命周期事件（来自 beforeToolCall）推送到同一条 SSE 流：
-      // required → approval_required（带风险/过期时间）；resolved/expired → 结束事件；
-      // notice → policy_notice（策略直接拦截提示）。多会话并发时按会话隔离推送。
-      const unsubApprovals = subscribeApprovalLifecycle((e) => {
-        if (e.type === "required") {
-          if (e.state.sessionId && e.state.sessionId !== session.id) return;
-          send({
-            type: "approval_required",
-            id: e.state.id,
-            toolName: e.state.toolName,
-            args: e.state.args,
-            risk: e.state.risk,
-            riskReason: e.state.riskReason,
-            expiresAt: e.state.expiresAt,
-          });
-        } else if (e.type === "resolved" || e.type === "expired") {
-          if (e.state.sessionId && e.state.sessionId !== session.id) return;
-          send({
-            type: e.type === "resolved" ? "approval_resolved" : "approval_expired",
-            id: e.state.id,
-            approve: e.type === "resolved" && e.state.status === "approved",
-          });
-        } else if (e.type === "notice") {
-          if (e.sessionId && e.sessionId !== session.id) return;
-          send({
-            type: "policy_notice",
-            id: e.id,
-            toolName: e.toolName,
-            args: e.args,
-            action: e.action,
-            reason: e.reason,
-          });
-        }
+        send(event);
       });
 
       let aborted = false;
       let runError: unknown = undefined;
       const runStartedAt = Date.now();
+      // 注入 plan_propose 会话上下文（本轮 prompt 期间有效）
+      setPlanCtx({ sessionId: session.id, surface: session.surface ?? "coding" });
       try {
-        await a.prompt(message);
+        await a.prompt(message, imageContents.length > 0 ? imageContents : undefined);
         await a.waitForIdle();
       } catch (err) {
         runError = err;
@@ -254,8 +226,8 @@ export async function POST(req: Request) {
         } catch (err) {
           console.error("[memory] 写入失败:", err);
         }
-        unsubApprovals();
-        unsub();
+        unsubBus();
+        setPlanCtx(undefined);
         send(
           stopped
             ? { type: "stopped", message: "任务已停止" }

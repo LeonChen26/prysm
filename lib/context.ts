@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { messageText } from "./messages";
+import { envValue } from "./config";
 
 /**
  * 上下文压缩（阶段 2）
@@ -7,8 +8,15 @@ import { messageText } from "./messages";
  * 把最早的一批消息交给 LLM 生成摘要，替换为一条摘要消息。
  */
 
-export const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS ?? 50000);
-export const KEEP_RECENT_MESSAGES = Number(process.env.KEEP_RECENT_MESSAGES ?? 8);
+/** 压缩触发阈值（token，惰性读 env 以支持配置注入） */
+export function maxContextTokens(): number {
+  return Number(envValue("MAX_CONTEXT_TOKENS") ?? 50000);
+}
+
+/** 保留的最近消息条数（惰性读 env 以支持配置注入） */
+export function keepRecentMessages(): number {
+  return Number(envValue("KEEP_RECENT_MESSAGES") ?? 8);
+}
 
 /** 粗略 token 估算：CJK 约 1.2 字符/token，其他约 3.5 字符/token */
 export function estimateTokens(m: AgentMessage): number {
@@ -27,9 +35,9 @@ export async function transformContext(
   summarize: (oldMessages: AgentMessage[]) => Promise<string>,
 ): Promise<AgentMessage[]> {
   const total = messages.reduce((sum, m) => sum + estimateTokens(m), 0);
-  if (total <= MAX_CONTEXT_TOKENS) return messages;
+  if (total <= maxContextTokens()) return messages;
 
-  const keep = Math.min(KEEP_RECENT_MESSAGES, messages.length - 1);
+  const keep = Math.min(keepRecentMessages(), messages.length - 1);
   const old = messages.slice(0, messages.length - keep);
   const recent = messages.slice(messages.length - keep);
 

@@ -5,6 +5,7 @@
  */
 import {
   listPendingApprovals,
+  notifyApprovalNotice,
   requestApproval,
   resolveApproval,
   subscribeApprovalLifecycle,
@@ -105,6 +106,45 @@ async function main() {
     "决定后 pending 清空",
     listPendingApprovals().some((x) => x.id === "d1"),
     false,
+  );
+
+  console.log("\n== policy_notice 事件（denied_auto 策略拦截直接通知） ==");
+  const noticeEvents: string[] = [];
+  const unsubNotice = subscribeApprovalLifecycle((e) => {
+    if (e.type === "notice") {
+      noticeEvents.push(`${e.id ?? ""}:${e.toolName}:${e.action}:${e.reason}:${e.sessionId ?? ""}`);
+    }
+  });
+  notifyApprovalNotice("p1", "run_bash", { command: "rm -rf /" }, "命令命中禁止规则", "s5");
+  notifyApprovalNotice("p2", "write_file", { path: ".env" }, "路径被策略禁止");
+  unsubNotice();
+  expectEq(
+    "notice 事件顺序与字段（含会话 id）",
+    noticeEvents.join("|"),
+    "p1:run_bash:denied_auto:命令命中禁止规则:s5|p2:write_file:denied_auto:路径被策略禁止:",
+  );
+
+  console.log("\n== risk/riskReason 字段透传进生命周期事件 ==");
+  const riskEvents: string[] = [];
+  const unsubRisk = subscribeApprovalLifecycle((e) => {
+    if (e.type === "required") {
+      riskEvents.push(`${e.state.id}:risk=${e.state.risk ?? "none"}:reason=${e.state.riskReason ?? "none"}`);
+    }
+    if (e.type === "resolved") {
+      riskEvents.push(`resolved:${e.state.id}:risk=${e.state.risk ?? "none"}`);
+    }
+  });
+  const pr = requestApproval(
+    { id: "r1", toolName: "delete_file", args: { path: ".env" }, risk: "high", riskReason: "命中受保护路径（环境变量文件）" },
+    5000,
+  );
+  resolveApproval("r1", true);
+  await pr;
+  unsubRisk();
+  expectEq(
+    "risk 与 riskReason 随 required/resolved 事件透传",
+    riskEvents.join("|"),
+    "r1:risk=high:reason=命中受保护路径（环境变量文件）|resolved:r1:risk=high",
   );
 
   console.log("\n✓ 工具审批流验证通过");

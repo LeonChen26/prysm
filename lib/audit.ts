@@ -6,9 +6,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
-
-const AUDIT_DB = path.resolve(process.cwd(), "audit.db");
+import { basePath } from "./config";
 
 export type AuditAction =
   | "approved"
@@ -41,7 +39,7 @@ let db: DatabaseSync | undefined;
 
 function getDb(): DatabaseSync {
   if (db) return db;
-  const d = new DatabaseSync(AUDIT_DB);
+  const d = new DatabaseSync(basePath("audit.db"));
   d.exec(`
     CREATE TABLE IF NOT EXISTS approvals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

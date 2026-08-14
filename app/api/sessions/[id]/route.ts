@@ -1,6 +1,6 @@
 import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { getAgent } from "@/lib/agent";
+import { createCore } from "@/lib/core";
 import {
   deleteSession,
   getSession,
@@ -10,6 +10,9 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** 统一入口：注入 baseDir/env（Phase 1a.3） */
+const core = createCore({ baseDir: process.cwd(), env: process.env });
 
 function toUiMessage(m: AgentMessage) {
   if (m.role === "user") {
@@ -40,7 +43,7 @@ export async function GET(
     if (!session) {
       return Response.json({ error: "会话不存在" }, { status: 404 });
     }
-    const agent = await getAgent(id);
+    const agent = await core.getAgent(id);
     const messages = agent.state.messages
       .map(toUiMessage)
       .filter((m): m is NonNullable<typeof m> => m !== null);

@@ -15,19 +15,21 @@ export async function GET() {
   }
 }
 
-/** POST /api/sessions —— 新建会话 */
+/** POST /api/sessions —— 新建会话（可指定 surface: work/coding） */
 export async function POST(req: Request) {
   try {
     let title: string | undefined;
+    let surface: "work" | "coding" | undefined;
     try {
       const body = await req.json();
       if (typeof body?.title === "string" && body.title.trim()) {
         title = body.title.trim().slice(0, 40);
       }
+      if (body?.surface === "work") surface = "work";
     } catch {
       /* 无请求体也可 */
     }
-    const session = createSession(title);
+    const session = createSession(title, surface);
     return Response.json({ session }, { status: 201 });
   } catch (err) {
     return Response.json(

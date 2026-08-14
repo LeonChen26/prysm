@@ -5,7 +5,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
+import { basePath } from "./config";
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
@@ -22,15 +22,13 @@ export interface TodoUpdate {
   title?: string;
 }
 
-const TODO_DB = path.resolve(process.cwd(), "todo.db");
-
 let todos: TodoItem[] = [];
 let seq = 0;
 let db: DatabaseSync | undefined;
 
 function getDb(): DatabaseSync {
   if (db) return db;
-  const d = new DatabaseSync(TODO_DB);
+  const d = new DatabaseSync(basePath("todo.db"));
   d.exec(`
     CREATE TABLE IF NOT EXISTS todos (
       id TEXT PRIMARY KEY,

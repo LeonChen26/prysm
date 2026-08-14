@@ -5,11 +5,34 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
 import { fetchUrlAsText, webSearch } from "./web";
-import { AGENT_WORKDIR, ALLOWED_ROOTS, resolveInWorkdir } from "./paths";
+import { AGENT_WORKDIR, ALLOWED_ROOTS, getAllowedRoots, getAgentWorkdir, resolveInWorkdirOrThrow } from "./paths";
 import { TOOL_META } from "./tool-meta";
+import type { SubagentSpec } from "./subagent";
+import { proposePlan } from "./plan";
+import type { Surface } from "./session";
 
 // re-export 兼容历史导入（测试脚本从 lib/tools 引入 AGENT_WORKDIR）
 export { AGENT_WORKDIR, ALLOWED_ROOTS } from "./paths";
+
+/**
+ * spawn_subagent 执行器（Phase 5 延迟注入打破 tools↔agent 循环依赖）。
+ * agent.ts 的 runSubagentCore 通过 setSpawnSubagentImpl 注入；未注入时工具返回"未启用"。
+ */
+export type SpawnSubagentImpl = (spec: SubagentSpec) => Promise<string>;
+let spawnSubagentImpl: SpawnSubagentImpl | undefined;
+export function setSpawnSubagentImpl(fn: SpawnSubagentImpl | undefined): void {
+  spawnSubagentImpl = fn;
+}
+
+/**
+ * plan_propose 会话上下文（Phase 7 延迟注入）。
+ * agent route 在提示前通过 setPlanCtx 注入当前会话的 sessionId/surface，
+ * 供 plan_propose 工具唯一确定计划归属（单用户本地场景，多会话并发时以最近一次为准）。
+ */
+let planCtx: { sessionId: string; surface: Surface } | undefined;
+export function setPlanCtx(ctx: { sessionId: string; surface: Surface } | undefined): void {
+  planCtx = ctx;
+}
 
 interface FileHit {
   path: string;
@@ -187,7 +210,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const dir = resolveInWorkdir(params.dir ?? "");
+      const dir = resolveInWorkdirOrThrow(params.dir ?? "");
       const entries = await fs.readdir(dir, { withFileTypes: true });
       const lines = entries.map((e) => (e.isDirectory() ? `[dir] ${e.name}` : e.name));
       return {
@@ -205,7 +228,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdir(params.path);
+      const file = resolveInWorkdirOrThrow(params.path);
       const stat = await fs.stat(file);
       if (stat.size > 100 * 1024) {
         throw new Error(`文件过大 (${stat.size} 字节)，仅支持读取 100KB 以内`);
@@ -227,7 +250,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdir(params.path);
+      const file = resolveInWorkdirOrThrow(params.path);
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, params.content, "utf-8");
       return {
@@ -252,7 +275,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdir(params.path);
+      const file = resolveInWorkdirOrThrow(params.path);
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.appendFile(file, params.content, "utf-8");
       return {
@@ -275,7 +298,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const dir = resolveInWorkdir(params.path);
+      const dir = resolveInWorkdirOrThrow(params.path);
       await fs.mkdir(dir, { recursive: true });
       return {
         content: [{ type: "text", text: `目录已就绪: ${params.path}` }],
@@ -293,8 +316,8 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const src = resolveInWorkdir(params.from);
-      const dst = resolveInWorkdir(params.to);
+      const src = resolveInWorkdirOrThrow(params.from);
+      const dst = resolveInWorkdirOrThrow(params.to);
       await fs.mkdir(path.dirname(dst), { recursive: true });
       await fs.rename(src, dst);
       return {
@@ -315,8 +338,8 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const src = resolveInWorkdir(params.from);
-      const dst = resolveInWorkdir(params.to);
+      const src = resolveInWorkdirOrThrow(params.from);
+      const dst = resolveInWorkdirOrThrow(params.to);
       await fs.mkdir(path.dirname(dst), { recursive: true });
       await fs.copyFile(src, dst);
       return {
@@ -336,7 +359,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdir(params.path);
+      const file = resolveInWorkdirOrThrow(params.path);
       await fs.unlink(file);
       return {
         content: [{ type: "text", text: `已删除文件: ${params.path}` }],
@@ -357,7 +380,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdir(params.path);
+      const file = resolveInWorkdirOrThrow(params.path);
       try {
         const stat = await fs.stat(file);
         if (!stat.isFile()) {
@@ -648,6 +671,148 @@ export const tools: AgentTool<any>[] = [
       return {
         content: [{ type: "text", text }],
         details: { port: params.port },
+      };
+    },
+  },
+  {
+    name: "spawn_subagent",
+    label: "派生子 agent",
+    description:
+      "派生一个独立的子 agent 并行完成子任务（只读研究型可读文件/搜索，读写执行型可修改文件）。子 agent 上下文与主会话隔离，完成后只返回摘要。适合将可并行的独立子任务委派出去。",
+    parameters: Type.Object({
+      task: Type.String({ description: "交给子 agent 的任务描述" }),
+      capability: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal("readonly", { description: "只读：不可修改文件" }),
+            Type.Literal("readwrite", { description: "读写：可修改文件" }),
+          ],
+          { description: "子 agent 能力类型，默认 readonly" },
+        ),
+      ),
+      surface: Type.Optional(
+        Type.Union(
+          [Type.Literal("work"), Type.Literal("coding")],
+          { description: "会话形态（可选）" },
+        ),
+      ),
+      timeoutMs: Type.Optional(
+        Type.Integer({
+          minimum: 1000,
+          description: "子 agent 超时（毫秒），默认 120000",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs & {
+        task: string;
+        capability?: "readonly" | "readwrite";
+        surface?: "work" | "coding";
+        timeoutMs?: number;
+      };
+      if (!spawnSubagentImpl) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "子 agent 编排尚未启用（Phase 5 未注入执行器）。",
+            },
+          ],
+          details: { enabled: false },
+        };
+      }
+      const summary = await spawnSubagentImpl({
+        parentSessionId: _toolCallId,
+        task: params.task,
+        capability: params.capability ?? "readonly",
+        surface: params.surface,
+        timeoutMs: params.timeoutMs,
+      });
+      return {
+        content: [
+          { type: "text", text: `子 agent 完成，摘要：\n${summary}` },
+        ],
+        details: { summary },
+      };
+    },
+  },
+  {
+    name: "plan_propose",
+    label: "提出执行计划",
+    description:
+      "在执行一项复杂任务前，先产出结构化计划（步骤 + 涉及工具 + 预期）并等待用户确认。计划提交后本调用会阻塞，直到用户在界面确认或拒绝；批准后继续执行，拒绝则根据反馈调整。适合多步骤、可能改动文件或调用外部工具的任务。",
+    parameters: Type.Object({
+      summary: Type.Optional(Type.String({ description: "计划整体目标的一句话概括" })),
+      steps: Type.Array(
+        Type.Object({
+          title: Type.String({ description: "步骤标题" }),
+          detail: Type.Optional(Type.String({ description: "步骤说明" })),
+          tool: Type.Optional(Type.String({ description: "涉及的工具（如 write_file / mcp__xxx__tool）" })),
+          expected: Type.Optional(Type.String({ description: "该步骤的预期结果" })),
+        }),
+        { description: "计划步骤列表" },
+      ),
+      timeoutMs: Type.Optional(
+        Type.Integer({
+          minimum: 1000,
+          description: "等待确认超时（毫秒），默认 5 分钟",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs & {
+        summary?: string;
+        steps: { title: string; detail?: string; tool?: string; expected?: string }[];
+        timeoutMs?: number;
+      };
+      if (!planCtx) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "计划模式尚未就绪（缺少会话上下文）。",
+            },
+          ],
+          details: { enabled: false },
+        };
+      }
+      if (!Array.isArray(params.steps) || params.steps.length === 0) {
+        return {
+          content: [
+            { type: "text", text: "计划步骤不能为空，请列出至少一个步骤后再提交。" },
+          ],
+          details: { error: "empty_steps" },
+        };
+      }
+      const { approved, plan } = await proposePlan({
+        sessionId: planCtx.sessionId,
+        surface: planCtx.surface,
+        summary: params.summary,
+        steps: params.steps,
+        timeoutMs: params.timeoutMs,
+      });
+      const planText = plan.steps
+        .map((s) => `- ${s.title}${s.tool ? `（工具: ${s.tool}）` : ""}`)
+        .join("\n");
+      if (approved) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `用户已确认以下计划，开始逐步执行：\n${planText}`,
+            },
+          ],
+          details: { planId: plan.id, approved: true },
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: `用户${plan.reason ? `（${plan.reason}）` : ""}未确认该计划，请根据反馈调整后重新规划。计划：\n${planText}`,
+          },
+        ],
+        details: { planId: plan.id, approved: false, reason: plan.reason },
       };
     },
   },

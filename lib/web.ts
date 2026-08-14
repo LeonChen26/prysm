@@ -9,6 +9,8 @@
  * 默认为 bing —— 中国网络环境可直连，解析其标准结果块。
  */
 
+import { envValue } from "./config";
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -17,6 +19,9 @@ export interface SearchResult {
 
 const DEFAULT_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+const searchProvider = () =>
+  (envValue("WEB_SEARCH_PROVIDER") || "bing").toLowerCase();
 
 async function fetchText(url: string, timeoutMs: number): Promise<string> {
   const res = await fetch(url, {
@@ -124,7 +129,7 @@ export async function webSearch(
   query: string,
   limit = 5,
 ): Promise<SearchResult[]> {
-  const provider = (process.env.WEB_SEARCH_PROVIDER || "bing").toLowerCase();
+  const provider = searchProvider();
   const url =
     provider === "duckduckgo"
       ? `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`

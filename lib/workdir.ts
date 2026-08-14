@@ -6,7 +6,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveInWorkdir } from "./paths";
+import { resolveInWorkdirOrThrow } from "./paths";
 
 export interface WorkdirEntry {
   name: string;
@@ -15,11 +15,12 @@ export interface WorkdirEntry {
   mtime: number;
 }
 
-/** 列出指定相对目录下的条目（目录优先 + 名称排序） */
+/** 列出指定相对目录下的条目（目录优先 + 名称排序）；root 指定工作区根（缺省默认工作区） */
 export async function listWorkdir(
   rel = "",
-): Promise<{ dir: string; entries: WorkdirEntry[] }> {
-  const dir = resolveInWorkdir(rel);
+  root?: string,
+): Promise<{ dir: string; root: string; entries: WorkdirEntry[] }> {
+  const dir = resolveInWorkdirOrThrow(rel, root);
   const names = await fs.readdir(dir, { withFileTypes: true });
   const entries: WorkdirEntry[] = [];
   for (const e of names) {
@@ -43,7 +44,7 @@ export async function listWorkdir(
         ? -1
         : 1,
   );
-  return { dir: rel, entries };
+  return { dir: rel, root: dir, entries };
 }
 
 export interface WorkdirFileContent {
@@ -54,11 +55,12 @@ export interface WorkdirFileContent {
 
 const MAX_PREVIEW_BYTES = 200 * 1024;
 
-/** 读取文本文件内容（最大 200KB，超出截断），仅限文件 */
+/** 读取文本文件内容（最大 200KB，超出截断），仅限文件；root 指定工作区根 */
 export async function readWorkdirFile(
   rel: string,
+  root?: string,
 ): Promise<WorkdirFileContent> {
-  const file = resolveInWorkdir(rel);
+  const file = resolveInWorkdirOrThrow(rel, root);
   const st = await fs.stat(file);
   if (st.isDirectory()) throw new Error("这是一个目录，请选择文件");
   const buf = await fs.readFile(file);
@@ -70,13 +72,14 @@ export async function readWorkdirFile(
   };
 }
 
-/** 新建文件（可带初始内容）或目录 */
+/** 新建文件（可带初始内容）或目录；root 指定工作区根 */
 export async function createWorkdirEntry(
   rel: string,
   type: "file" | "dir",
   content: string,
+  root?: string,
 ): Promise<void> {
-  const target = resolveInWorkdir(rel);
+  const target = resolveInWorkdirOrThrow(rel, root);
   if (type === "dir") {
     await fs.mkdir(target, { recursive: true });
   } else {
@@ -85,12 +88,13 @@ export async function createWorkdirEntry(
   }
 }
 
-/** 写入文件（覆盖），返回字节数 */
+/** 写入文件（覆盖），返回字节数；root 指定工作区根 */
 export async function writeWorkdirFile(
   rel: string,
   data: Uint8Array,
+  root?: string,
 ): Promise<number> {
-  const target = resolveInWorkdir(rel);
+  const target = resolveInWorkdirOrThrow(rel, root);
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, data);
   return data.byteLength;

@@ -7,12 +7,13 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { messageText } from "./messages";
+import { basePath } from "./config";
 
-const SESSIONS_DB = path.resolve(process.cwd(), "sessions.db");
+/** 会话形态：work（办公/自动化）或 coding（编码），Phase 1b 起持久化 */
+export type Surface = "work" | "coding";
 
 export interface SessionInfo {
   id: string;
@@ -21,13 +22,15 @@ export interface SessionInfo {
   updatedAt: number;
   /** 置顶标记：1 置顶（排序优先），0 普通 */
   pinned: number;
+  /** 会话形态（创建时确定，一个会话只属于一个 surface） */
+  surface: Surface;
 }
 
 let db: DatabaseSync | undefined;
 
 function getDb(): DatabaseSync {
   if (db) return db;
-  const d = new DatabaseSync(SESSIONS_DB);
+  const d = new DatabaseSync(basePath("sessions.db"));
   d.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -45,10 +48,13 @@ function getDb(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_session_messages
       ON session_messages(session_id, id);
   `);
-  // 旧库迁移：补 pinned 列（已存在则忽略）
+  // 旧库迁移：补 pinned / surface 列（已存在则忽略）
   const cols = d.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "pinned")) {
     d.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!cols.some((c) => c.name === "surface")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN surface TEXT NOT NULL DEFAULT 'coding'");
   }
   db = d;
   return d;
@@ -61,17 +67,21 @@ function rowToSession(row: Record<string, unknown>): SessionInfo {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
     pinned: Number(row.pinned ?? 0),
+    surface: row.surface === "work" ? "work" : "coding",
   };
 }
 
-export function createSession(title = "新会话"): SessionInfo {
+export function createSession(
+  title = "新会话",
+  surface: Surface = "coding",
+): SessionInfo {
   const d = getDb();
   const id = randomUUID();
   const now = Date.now();
   d.prepare(
-    "INSERT INTO sessions (id, title, created_at, updated_at, pinned) VALUES (?, ?, ?, ?, 0)",
-  ).run(id, title, now, now);
-  return { id, title, createdAt: now, updatedAt: now, pinned: 0 };
+    "INSERT INTO sessions (id, title, created_at, updated_at, pinned, surface) VALUES (?, ?, ?, ?, 0, ?)",
+  ).run(id, title, now, now, surface);
+  return { id, title, createdAt: now, updatedAt: now, pinned: 0, surface };
 }
 
 /** 按最近更新排序的会话列表（置顶优先） */
@@ -264,13 +274,20 @@ export function restoreAllSessions(
     d.exec("DELETE FROM session_messages");
     d.exec("DELETE FROM sessions");
     const insS = d.prepare(
-      "INSERT INTO sessions (id, title, created_at, updated_at, pinned) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO sessions (id, title, created_at, updated_at, pinned, surface) VALUES (?, ?, ?, ?, ?, ?)",
     );
     const insM = d.prepare(
       "INSERT INTO session_messages (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
     );
     for (const s of sessions) {
-      insS.run(s.id, s.title, s.createdAt, s.updatedAt, s.pinned ?? 0);
+      insS.run(
+        s.id,
+        s.title,
+        s.createdAt,
+        s.updatedAt,
+        s.pinned ?? 0,
+        s.surface ?? "coding",
+      );
       for (const m of messagesBySession[s.id] ?? []) {
         insM.run(s.id, m.role, JSON.stringify(m), m.timestamp ?? Date.now());
       }
