@@ -4,6 +4,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -23,6 +24,7 @@ import {
   WbFileIcon,
   WbFolderIcon,
 } from "./chat-blocks";
+import { SettingsPanel } from "./settings-view";
 import {
   formatApprovalArgs,
   formatDuration,
@@ -62,11 +64,63 @@ const markdownComponents = {
   ),
 };
 
-/** 空状态快捷任务入口 */
+/** 空状态快捷任务入口（Coding 形态） */
 const QUICK_TASKS = [
   "搜索 DeepSeek 最新模型并给出对比",
   "整理 agent-workdir 里的项目并生成 README",
   "写一份 Next.js 服务端组件的介绍",
+];
+
+/** Work 形态空会话模板（办公任务）：点击即创建对应任务的会话并立即发起 */
+const WORK_TEMPLATES: {
+  id: string;
+  title: string;
+  desc: string;
+  icon: React.ReactNode;
+  prompt: string;
+}[] = [
+  {
+    id: "weekly-report",
+    title: "写周报",
+    desc: "自动汇总本周工作内容，生成结构化周报",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="17" rx="2" />
+        <path d="M3 9h18M8 2v4M16 2v4" />
+        <path d="M8 14l2.5-2.5 2 2L16 10" />
+      </svg>
+    ),
+    prompt:
+      "请帮我生成本周周报，包含工作内容、进度、问题和下周计划，需要结构化格式、分点列出。",
+  },
+  {
+    id: "meeting-minutes",
+    title: "会议纪要",
+    desc: "从录音/文字记录中提取关键决策和行动项",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M7 3h10a1 1 0 0 1 1 1v17l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1Z" />
+        <path d="M9 8h6M9 12h6M9 16h4" />
+      </svg>
+    ),
+    prompt:
+      "请整理以下会议记录，提取关键决策、行动项和负责人，生成结构化会议纪要：\n\n[在此粘贴会议记录或录音文字稿]",
+  },
+  {
+    id: "data-analysis",
+    title: "数据分析",
+    desc: "导入表格数据，生成可视化图表和洞察报告",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 20h16" />
+        <rect x="6" y="12" width="3" height="6" rx="0.5" />
+        <rect x="11" y="8" width="3" height="10" rx="0.5" />
+        <rect x="16" y="4" width="3" height="14" rx="0.5" />
+      </svg>
+    ),
+    prompt:
+      "请分析附件中的数据表格，生成可视化图表（柱状图/折线图），并总结关键趋势和洞察。",
+  },
 ];
 
 /** 超过该字符数的消息默认折叠，点击展开 */
@@ -153,6 +207,14 @@ export function ChatPanel() {
   const [statsOpen, setStatsOpen] = useState(false);
   /** 浏览器通知开关（任务完成时提醒） */
   const [notifyOn, setNotifyOn] = useState(false);
+  /** Surface 形态：Work（办公自动化）/ Coding（编码） */
+  const [surface, setSurface] = useState<"work" | "coding">("coding");
+  /** 右侧面板是否折叠：Work 形态默认收起以专注对话，Coding 形态展开 */
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  /** 左栏视图：会话列表 / 文件浏览器 / 设置 */
+  const [activityView, setActivityView] = useState<"sessions" | "files" | "settings">("sessions");
+  /** 右栏 Tab：工具卡片 / 记忆 / 日志 / 审计 */
+  const [rightTab, setRightTab] = useState<"cards" | "memory" | "logs" | "audit">("cards");
   /** 工作区文件浏览器 */
   const [wbDirs, setWbDirs] = useState<
     Record<string, { name: string; isDir: boolean; size: number; mtime: number }[]>
@@ -399,21 +461,23 @@ export function ChatPanel() {
     return () => clearTimeout(timer);
   }, [sessionQuery]);
 
-  // 加载会话列表，并选中最近的会话
+  // 加载会话列表，并选中最近且属于当前形态的会话
   useEffect(() => {
     fetch("/api/sessions")
       .then((r) => r.json())
       .then(async (data) => {
         const list = (data?.sessions ?? []) as SessionInfo[];
         setSessions(list);
-        if (list.length > 0) {
-          setSessionId(list[0].id);
-          const res = await fetch(`/api/sessions/${list[0].id}`);
+        const first = list.find((s) => (s.surface ?? "coding") === surface);
+        if (first) {
+          setSessionId(first.id);
+          const res = await fetch(`/api/sessions/${first.id}`);
           const detail = await res.json();
           if (detail?.messages) setMessages(detail.messages);
         }
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** 切换到指定会话 */
@@ -452,27 +516,35 @@ export function ChatPanel() {
     [busy, switchSession],
   );
 
-  /** 新建会话 */
-  const newSession = useCallback(async () => {
-    if (busy) return;
-    try {
-      const res = await fetch("/api/sessions", { method: "POST" });
-      const data = await res.json();
-      const s = data?.session as SessionInfo | undefined;
-      if (s) {
-        setSessions((list) => [s, ...list]);
-        setSessionId(s.id);
-        setMessages([]);
-        setCards([]);
-        setTodos([]);
-        setApprovals([]);
-        setPlans([]);
-        setError(null);
+  /** 当前形态可见的会话（一个会话只属于一个 surface） */
+  const visibleSessions = useMemo(
+    () => sessions.filter((s) => (s.surface ?? "coding") === surface),
+    [sessions, surface],
+  );
+
+  /** 切换形态：过滤会话列表，并把当前会话切到新形态下最近的一个；Work 默认收起右侧面板 */
+  const changeSurface = useCallback(
+    (next: "work" | "coding") => {
+      setSurface(next);
+      setPanelCollapsed(next === "work"); // Work 专注对话（收起工具面板），Coding 展开
+      const cur = sessions.find((s) => s.id === sessionId);
+      if (cur && (cur.surface ?? "coding") !== next) {
+        const first = sessions.find((s) => (s.surface ?? "coding") === next);
+        if (first) {
+          switchSession(first.id);
+        } else {
+          setSessionId(null);
+          setMessages([]);
+          setCards([]);
+          setTodos([]);
+          setApprovals([]);
+          setPlans([]);
+          setError(null);
+        }
       }
-    } catch {
-      setError("新建会话失败");
-    }
-  }, [busy]);
+    },
+    [sessions, sessionId, switchSession],
+  );
 
   /** 删除会话 */
   const removeSession = useCallback(
@@ -934,12 +1006,18 @@ export function ChatPanel() {
 
   /**
    * 核心：向 agent 发送消息并消费 SSE 流。
-   * @param text         用户消息内容
-   * @param rewindToText 重新生成时回退到该用户消息（后端按文本截断历史）
-   * @param appendUser   是否追加 user 消息（重新生成时历史已含该消息，跳过）
+   * @param text             用户消息内容
+   * @param rewindToText     重新生成时回退到该用户消息（后端按文本截断历史）
+   * @param appendUser       是否追加 user 消息（重新生成时历史已含该消息，跳过）
+   * @param overrideSessionId 显式指定会话（模板新建会话后避免闭包中旧 sessionId 造成重复建会话）
    */
   const streamReply = useCallback(
-    async (text: string, rewindToText?: string, appendUser = true) => {
+    async (
+      text: string,
+      rewindToText?: string,
+      appendUser = true,
+      overrideSessionId?: string | null,
+    ) => {
       const t = text.trim();
       if (!t || busyRef.current) return;
       setError(null);
@@ -964,7 +1042,11 @@ export function ChatPanel() {
         const res = await fetch("/api/agent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: t, sessionId, rewindToText }),
+          body: JSON.stringify({
+            message: t,
+            sessionId: overrideSessionId === undefined ? sessionId : overrideSessionId,
+            rewindToText,
+          }),
         });
         if (!res.ok || !res.body) {
           const data = await res.json().catch(() => null);
@@ -1139,6 +1221,39 @@ export function ChatPanel() {
       }
     },
     [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion, notifyApproval, showNotice, applyApprovalToCard],
+  );
+
+  /** 新建会话（携带当前 surface 形态；preset 可选：创建后立即以该提示词发起任务） */
+  const newSession = useCallback(
+    async (preset?: string) => {
+      if (busy) return;
+      try {
+        const res = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ surface }),
+        });
+        const data = await res.json();
+        const s = data?.session as SessionInfo | undefined;
+        if (s) {
+          setSessions((list) => [s, ...list]);
+          setSessionId(s.id);
+          setMessages([]);
+          setCards([]);
+          setTodos([]);
+          setApprovals([]);
+          setPlans([]);
+          setError(null);
+          if (preset) {
+            // 显式传入新会话 id，避免闭包中的旧 sessionId 触发后端另建会话
+            await streamReply(preset, undefined, true, s.id);
+          }
+        }
+      } catch {
+        setError("新建会话失败");
+      }
+    },
+    [busy, surface, streamReply],
   );
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
@@ -1649,10 +1764,44 @@ export function ChatPanel() {
           <span className="brand-dot" />
           <h1>Prysm</h1>
         </div>
+        <div className="surface-switch">
+          <button
+            className={`surface-tab ${surface === "work" ? "surface-tab-active" : ""}`}
+            onClick={() => changeSurface("work")}
+          >
+            Work
+          </button>
+          <button
+            className={`surface-tab ${surface === "coding" ? "surface-tab-active" : ""}`}
+            onClick={() => changeSurface("coding")}
+          >
+            Coding
+          </button>
+        </div>
         <div className={`status ${busy ? "status-busy" : ""}`}>
           <span className="status-dot" />
           {busy ? "正在执行任务…" : "空闲"}
         </div>
+        <button
+          className={`panel-toggle ${panelCollapsed ? "panel-collapsed" : ""}`}
+          onClick={() => setPanelCollapsed((c) => !c)}
+          title={panelCollapsed ? "展开右侧面板" : "收起右侧面板"}
+          aria-label="切换右侧面板"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M9 4v16" />
+          </svg>
+        </button>
         <button
           className={`notify-toggle ${notifyOn ? "notify-on" : ""}`}
           onClick={toggleNotify}
@@ -1719,7 +1868,42 @@ export function ChatPanel() {
           } as React.CSSProperties
         }
       >
+        {/* Activity Bar */}
+        <nav className="activity-bar">
+          <button
+            className={`activity-item ${activityView === "sessions" ? "activity-item-active" : ""}`}
+            onClick={() => setActivityView("sessions")}
+            title="会话"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+          <button
+            className={`activity-item ${activityView === "files" ? "activity-item-active" : ""}`}
+            onClick={() => setActivityView("files")}
+            title="文件"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+          <button
+            className={`activity-item ${activityView === "settings" ? "activity-item-active" : ""}`}
+            onClick={() => setActivityView("settings")}
+            title="设置"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </nav>
+
+        {/* Sidebar — content switches by activityView */}
         <aside className="session-panel">
+          {activityView === "sessions" && (
+            <>
           <div className="session-head">
             <span className="session-title">
               {selectMode ? `已选 ${selectedIds.size}` : "会话"}
@@ -1763,7 +1947,7 @@ export function ChatPanel() {
                 </button>
                 <button
                   className="session-new"
-                  onClick={newSession}
+                  onClick={() => newSession()}
                   disabled={busy}
                   title="新建会话"
                 >
@@ -1797,16 +1981,20 @@ export function ChatPanel() {
             </div>
           )}
           <div className="session-scroll">
-            {sessions.length === 0 ? (
-              <p className="session-empty">还没有会话</p>
+            {visibleSessions.length === 0 ? (
+              <p className="session-empty">
+                {surface === "work"
+                  ? "还没有 Work（办公自动化）会话，点击 ＋ 新建"
+                  : "还没有 Coding（编码）会话，点击 ＋ 新建"}
+              </p>
             ) : (
               (() => {
                 const q = sessionQuery.trim().toLowerCase();
                 const filtered = q
-                  ? sessions.filter((s) =>
+                  ? visibleSessions.filter((s) =>
                       (s.title || "").toLowerCase().includes(q),
                     )
-                  : sessions;
+                  : visibleSessions;
                 if (filtered.length === 0) {
                   return <p className="session-empty">没有匹配的会话</p>;
                 }
@@ -1977,6 +2165,124 @@ export function ChatPanel() {
               />
             </label>
           </div>
+            </>
+          )}
+
+          {/* Files view */}
+          {activityView === "files" && (
+            <>
+              <div className="session-head">
+                <span className="session-title">文件</span>
+                <div className="session-head-actions">
+                  <label className="session-new" title="上传文件到工作区">
+                    ⬆
+                    <input
+                      type="file"
+                      hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) uploadWorkdirFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <button
+                    className="session-new"
+                    onClick={() => setWbCreateOpen(true)}
+                    title="新建文件/目录"
+                  >
+                    ＋
+                  </button>
+                </div>
+              </div>
+              <div className="session-scroll">
+                <div className="wb-section">
+                  {wbCreateOpen && (
+                    <div className="wb-create">
+                      <input
+                        className="wb-create-input"
+                        placeholder="名称（如 notes/readme.md）"
+                        value={wbCreateName}
+                        autoFocus
+                        onChange={(e) => setWbCreateName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") createWorkdirEntry();
+                          if (e.key === "Escape") {
+                            setWbCreateOpen(false);
+                            setWbCreateName("");
+                          }
+                        }}
+                      />
+                      <div className="wb-create-type">
+                        <button
+                          type="button"
+                          className={`wb-type-btn ${wbCreateType === "file" ? "wb-type-on" : ""}`}
+                          onClick={() => setWbCreateType("file")}
+                        >
+                          文件
+                        </button>
+                        <button
+                          type="button"
+                          className={`wb-type-btn ${wbCreateType === "dir" ? "wb-type-on" : ""}`}
+                          onClick={() => setWbCreateType("dir")}
+                        >
+                          目录
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="wb-tree">
+                    {wbDirs[""] !== undefined ? (
+                      wbDirs[""].length === 0 ? (
+                        <p className="wb-empty">（空）</p>
+                      ) : (
+                        renderWbTree("")
+                      )
+                    ) : (
+                      <p className="wb-empty">加载中…</p>
+                    )}
+                  </div>
+                  {wbPreview && (
+                    <div className="wb-preview">
+                      <div className="wb-preview-head">
+                        <span className="wb-preview-path">{wbPreview.path}</span>
+                        <button
+                          type="button"
+                          className="wb-preview-close"
+                          onClick={() => setWbPreview(null)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <pre className="wb-preview-body">
+                        {wbPreview.content}
+                        {wbPreview.truncated ? "\n…(内容过长，已截断)" : ""}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Settings view */}
+          {activityView === "settings" && (
+            <>
+              <div className="session-head">
+                <span className="session-title">设置</span>
+              </div>
+              <div className="session-scroll">
+                <SettingsPanel
+                  surface={surface}
+                  setSurface={changeSurface}
+                  theme={theme}
+                  toggleTheme={toggleTheme}
+                  notifyOn={notifyOn}
+                  toggleNotify={toggleNotify}
+                />
+              </div>
+            </>
+          )}
         </aside>
 
         <div
@@ -2045,23 +2351,53 @@ export function ChatPanel() {
                     <path d="M9 10.5h6M9 13.5h3" />
                   </svg>
                 </div>
-                <p className="empty-title">开始你的第一个任务</p>
-                <p className="empty-sub">
-                  例如：搜索 DeepSeek 最新模型，或在 agent-workdir 里整理一个项目的 README
-                </p>
-                <div className="quick-chips">
-                  {QUICK_TASKS.map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      className="quick-chip"
-                      disabled={busy}
-                      onClick={() => sendQuick(q)}
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
+                {surface === "work" ? (
+                  <>
+                    <p className="empty-title">选择办公任务模板</p>
+                    <p className="empty-sub">
+                      点击模板将创建对应任务的会话并立即开始，可自由补充细节
+                    </p>
+                    <div className="template-grid">
+                      {WORK_TEMPLATES.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className="template-card"
+                          disabled={busy}
+                          onClick={() => newSession(t.prompt)}
+                        >
+                          <span className="template-icon" aria-hidden="true">
+                            {t.icon}
+                          </span>
+                          <span className="template-body">
+                            <strong className="template-title">{t.title}</strong>
+                            <span className="template-desc">{t.desc}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="empty-title">开始你的第一个任务</p>
+                    <p className="empty-sub">
+                      例如：搜索 DeepSeek 最新模型，或在 agent-workdir 里整理一个项目的 README
+                    </p>
+                    <div className="quick-chips">
+                      {QUICK_TASKS.map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          className="quick-chip"
+                          disabled={busy}
+                          onClick={() => sendQuick(q)}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
             {/* 本轮最后一条用户消息之后内联展示工具执行（实时） */}
@@ -2530,548 +2866,491 @@ export function ChatPanel() {
           onMouseDown={startResize("mid")}
           aria-hidden="true"
         />
-        <aside className="panel">
-          <div className="panel-title">
-            <h2>任务记录</h2>
-            <span className="panel-count">{cards.length}</span>
+        <aside className="panel" style={{ display: panelCollapsed ? "none" : "flex" }}>
+          <div className="panel-tabs">
+            <button
+              className={`panel-tab ${rightTab === "cards" ? "panel-tab-active" : ""}`}
+              onClick={() => setRightTab("cards")}
+            >
+              工具卡片 {cards.length > 0 && `(${cards.length})`}
+            </button>
+            <button
+              className={`panel-tab ${rightTab === "memory" ? "panel-tab-active" : ""}`}
+              onClick={() => { setRightTab("memory"); if (!memoryOpen) { setMemoryOpen(true); refreshMemory(); } }}
+            >
+              记忆 {memoryTotal > 0 && `(${memoryTotal})`}
+            </button>
+            <button
+              className={`panel-tab ${rightTab === "logs" ? "panel-tab-active" : ""}`}
+              onClick={() => {
+                setRightTab("logs");
+                setLogsOpen(true);
+                setStatsOpen(true);
+                refreshRunLogs();
+                refreshStats();
+              }}
+            >
+              日志
+            </button>
+            <button
+              className={`panel-tab ${rightTab === "audit" ? "panel-tab-active" : ""}`}
+              onClick={() => { setRightTab("audit"); if (!auditOpen) { setAuditOpen(true); refreshAudits(); } }}
+            >
+              审计
+            </button>
           </div>
           <div className="panel-scroll">
-            <div className="wb-section">
-              <div className="panel-title wb-head">
-                <h2>工作区文件</h2>
-                <div className="wb-head-actions">
-                  <label className="wb-act" title="上传文件到工作区">
-                    ⬆
-                    <input
-                      type="file"
-                      hidden
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) uploadWorkdirFile(f);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="wb-act"
-                    title="新建文件 / 目录"
-                    onClick={() => setWbCreateOpen((v) => !v)}
-                  >
-                    ＋
-                  </button>
-                </div>
-              </div>
-              {wbCreateOpen && (
-                <div className="wb-create">
-                  <input
-                    className="wb-create-input"
-                    placeholder="名称（如 notes/readme.md）"
-                    value={wbCreateName}
-                    autoFocus
-                    onChange={(e) => setWbCreateName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") createWorkdirEntry();
-                      if (e.key === "Escape") {
-                        setWbCreateOpen(false);
-                        setWbCreateName("");
-                      }
-                    }}
-                  />
-                  <div className="wb-create-type">
-                    <button
-                      type="button"
-                      className={`wb-type-btn ${wbCreateType === "file" ? "wb-type-on" : ""}`}
-                      onClick={() => setWbCreateType("file")}
-                    >
-                      文件
-                    </button>
-                    <button
-                      type="button"
-                      className={`wb-type-btn ${wbCreateType === "dir" ? "wb-type-on" : ""}`}
-                      onClick={() => setWbCreateType("dir")}
-                    >
-                      目录
-                    </button>
+            {/* Tab: 工具卡片 */}
+            {rightTab === "cards" && (
+              <>
+                {/* Phase 7：当前形态可用的内置工具徽标（work/coding 工具集差异化可视化） */}
+                <div className="surface-tools">
+                  <div className="surface-tools-head">
+                    <span className="surface-tools-label">
+                      {surface === "work" ? "Work" : "Coding"} 形态工具
+                    </span>
+                    <span className="surface-tools-count">
+                      {Object.values(TOOL_META).filter(
+                        (m) => !m.surface || m.surface === surface,
+                      ).length}{" "}
+                      个内置工具
+                    </span>
                   </div>
-                </div>
-              )}
-              <div className="wb-tree">
-                {wbDirs[""] !== undefined ? (
-                  wbDirs[""].length === 0 ? (
-                    <p className="wb-empty">（空）</p>
-                  ) : (
-                    renderWbTree("")
-                  )
-                ) : (
-                  <p className="wb-empty">加载中…</p>
-                )}
-              </div>
-              {wbPreview && (
-                <div className="wb-preview">
-                  <div className="wb-preview-head">
-                    <span className="wb-preview-path">{wbPreview.path}</span>
-                    <button
-                      type="button"
-                      className="wb-preview-close"
-                      onClick={() => setWbPreview(null)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <pre className="wb-preview-body">
-                    {wbPreview.content}
-                    {wbPreview.truncated ? "\n…(内容过长，已截断)" : ""}
-                  </pre>
-                </div>
-              )}
-            </div>
-            <div className="memory-section">
-              <div className="panel-title memory-head">
-                <h2>情景记忆</h2>
-                <span className="panel-count">{memoryTotal}</span>
-              </div>
-              {memoryOpen && memoryTotal > 0 && (
-                <div className="memory-body">
-                  {memoryEpisodes.map((e) => (
-                    <div key={e.id} className="memory-item">
-                      <div className="memory-item-head">
+                  <div className="surface-tools-grid">
+                    {Object.entries(TOOL_META)
+                      .filter(([, m]) => !m.surface || m.surface === surface)
+                      .map(([name, meta]) => (
                         <span
-                          className={`memory-role memory-role-${e.role === "user" ? "user" : "assistant"}`}
+                          key={name}
+                          className={`surface-tool-chip surface-tool-${meta.type}`}
+                          title={`${name}${meta.sensitive ? "（敏感，操作需审批）" : ""}`}
                         >
-                          {e.role === "user" ? "用户" : "Agent"}
+                          {meta.label}
                         </span>
-                        <span className="memory-time">
-                          {formatMsgTime(e.ts)}
-                        </span>
+                      ))}
+                  </div>
+                  <p className="surface-tools-note">
+                    {surface === "work"
+                      ? "不含命令执行/环境调试类工具"
+                      : "不含联网检索类工具"}
+                  </p>
+                </div>
+                {todos.length > 0 && (
+                  <div className="todo-section">
+                    <div className="todo-progress">
+                      <div className="todo-progress-track">
+                        <div
+                          className="todo-progress-fill"
+                          style={{ width: `${todoPct}%` }}
+                        />
+                      </div>
+                      <span className="todo-progress-label">{todoPct}%</span>
+                    </div>
+                    <ol className="todo-list">
+                      {todos.map((t) => (
+                        <li
+                          key={t.id}
+                          draggable
+                          className={`todo-item todo-${t.status}`}
+                          title="拖拽调整顺序"
+                          onDragStart={(e) => {
+                            todoDragRef.current = t.id;
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            handleTodoDrop(t.id);
+                          }}
+                          onDragEnd={() => {
+                            todoDragRef.current = null;
+                          }}
+                        >
+                          <span className="todo-mark" aria-hidden="true">
+                            {t.status === "completed" ? "✓" : ""}
+                          </span>
+                          <div className="todo-body">
+                            <div className="todo-title">{t.title}</div>
+                            {t.detail && (
+                              <div className="todo-detail">{t.detail}</div>
+                            )}
+                          </div>
+                          <span className="todo-state">
+                            {TODO_STATUS_LABELS[t.status]}
+                          </span>
+                          <button
+                            type="button"
+                            className="todo-del"
+                            title="删除该步骤"
+                            aria-label="删除该步骤"
+                            onClick={() => removeTodo(t.id)}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="todo-append">
+                      {todoAppendOpen ? (
+                        <input
+                          className="todo-append-input"
+                          value={todoAppendText}
+                          autoFocus
+                          placeholder="新步骤名称，Enter 添加"
+                          onChange={(e) => setTodoAppendText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") appendTodo();
+                            if (e.key === "Escape") {
+                              setTodoAppendOpen(false);
+                              setTodoAppendText("");
+                            }
+                          }}
+                          onBlur={appendTodo}
+                        />
+                      ) : (
                         <button
                           type="button"
-                          className="memory-del"
-                          title="删除该条记忆"
-                          onClick={() => removeMemory(e.id)}
+                          className="todo-append-btn"
+                          onClick={() => setTodoAppendOpen(true)}
                         >
-                          ×
+                          ＋ 添加步骤
                         </button>
-                      </div>
-                      <p className="memory-content">{e.content}</p>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="memory-clear"
-                    onClick={clearAllMemory}
-                  >
-                    清空全部记忆
-                  </button>
-                </div>
-              )}
-              {memoryOpen && memoryTotal === 0 && (
-                <p className="memory-empty">暂无记忆</p>
-              )}
-              <button
-                type="button"
-                className="memory-toggle"
-                onClick={() => {
-                  setMemoryOpen((v) => !v);
-                  if (!memoryOpen) refreshMemory();
-                }}
-              >
-                {memoryOpen ? "收起记忆" : "查看记忆"}
-              </button>
-            </div>
-            <div className="logs-section">
-              <div className="panel-title logs-head">
-                <h2>运行日志</h2>
-                <span className="panel-count">{runLogs.length}</span>
-              </div>
-              {logsOpen && runLogs.length > 0 && (
-                <div className="logs-body">
-                  {runLogs.map((l) => (
-                    <div
-                      key={l.id}
-                      className={`log-item ${l.error ? "log-item-error" : l.stopped ? "log-item-stopped" : "log-item-done"}`}
-                    >
-                      <div className="log-item-head">
-                        <span className="log-title">{l.title || "未命名会话"}</span>
-                        <span className="log-state">
-                          {l.error ? "错误" : l.stopped ? "停止" : "完成"}
-                        </span>
-                      </div>
-                      <div className="log-item-meta">
-                        <span>{formatMsgTime(l.startedAt)}</span>
-                        <span>{formatDuration(l.durationMs)}</span>
-                        <span>{l.messageCount} 条消息</span>
-                      </div>
-                      {l.error && (
-                        <p className="log-error">{l.error.slice(0, 140)}</p>
                       )}
                     </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="logs-clear"
-                    onClick={clearRunLogs}
-                  >
-                    清空日志
-                  </button>
-                </div>
-              )}
-              {logsOpen && runLogs.length === 0 && (
-                <p className="logs-empty">暂无运行记录</p>
-              )}
-              <button
-                type="button"
-                className="logs-toggle"
-                onClick={() => {
-                  setLogsOpen((v) => !v);
-                  if (!logsOpen) refreshRunLogs();
-                }}
-              >
-                {logsOpen ? "收起日志" : "查看日志"}
-              </button>
-            </div>
-            <div className="stats-section">
-              <div className="panel-title stats-head">
-                <h2>运行统计</h2>
-                <span className="panel-count">{stats?.totalRuns ?? 0}</span>
-              </div>
-              {statsOpen && stats && (
-                <div className="stats-body">
-                  <div className="stats-grid">
-                    <div className="stats-cell">
-                      <span className="stats-num">{stats.totalRuns}</span>
-                      <span className="stats-label">总运行</span>
-                    </div>
-                    <div className="stats-cell">
-                      <span className="stats-num stats-ok">
-                        {Math.round(stats.successRate * 100)}%
-                      </span>
-                      <span className="stats-label">成功率</span>
-                    </div>
-                    <div className="stats-cell">
-                      <span className="stats-num">{formatDuration(stats.totalDurationMs)}</span>
-                      <span className="stats-label">总耗时</span>
-                    </div>
-                    <div className="stats-cell">
-                      <span className="stats-num">
-                        {stats.avgDurationMs ? formatDuration(stats.avgDurationMs) : "—"}
-                      </span>
-                      <span className="stats-label">平均耗时</span>
-                    </div>
                   </div>
-                  <div className="stats-sub-title">最近 7 天运行</div>
-                  <div className="stats-days">
-                    {stats.byDay.map((d) => {
-                      const max = Math.max(...stats.byDay.map((x) => x.runs), 1);
-                      return (
-                        <div key={d.day} className="stats-day" title={`${d.day}：${d.runs} 次`}>
-                          <div className="stats-day-bar-wrap">
-                            <div
-                              className="stats-day-bar"
-                              style={{ height: `${Math.max((d.runs / max) * 100, d.runs > 0 ? 8 : 2)}%` }}
-                            />
-                          </div>
-                          <span className="stats-day-label">{d.day.slice(3)}</span>
+                )}
+                {cards.length === 0 ? (
+                  <p className="panel-empty">
+                    Agent 调用工具时会在这里显示执行卡片。
+                  </p>
+                ) : (
+                  <ul className="card-list">
+                    {cards.map((card) => (
+                      <li
+                        key={card.id}
+                        className={`card card-${card.status} ${card.status === "running" ? "card-indeterminate" : ""}`}
+                      >
+                        <div className="card-head">
+                          <span className={`card-badge card-badge-${card.status}`}>
+                            {TOOL_META[card.toolName]?.type ?? "工具"}
+                          </span>
+                          <span className="card-status" aria-hidden="true" />
+                          <span className="card-name">
+                            {TOOL_META[card.toolName]?.label ?? card.toolName}
+                          </span>
+                          <span
+                            className={`card-state ${toolCardStateClass(card)}`}
+                            title={card.approval?.reason}
+                          >
+                            {toolCardStateText(card)}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
-                  <div className="stats-sub-title">工具使用排行</div>
-                  {stats.toolRanking.length === 0 ? (
-                    <p className="stats-empty">暂无工具调用</p>
-                  ) : (
-                    <div className="stats-tools">
-                      {stats.toolRanking.slice(0, 6).map((t) => {
-                        const max = stats.toolRanking[0]?.count ?? 1;
-                        return (
-                          <div key={t.name} className="stats-tool">
-                            <span className="stats-tool-name">
-                              {TOOL_META[t.name]?.label ?? t.name}
+                        <code className="card-args">
+                          {JSON.stringify(card.args)?.slice(0, 120)}
+                        </code>
+                        {card.result && (
+                          <>
+                            <button
+                              type="button"
+                              className={`card-expand ${expandedCards.has(card.id) ? "card-expand-open" : ""}`}
+                              onClick={() => toggleCard(card.id)}
+                            >
+                              {expandedCards.has(card.id) ? "收起结果" : "查看结果"}
+                            </button>
+                            {expandedCards.has(card.id) && (
+                              <pre className="card-result">{card.result}</pre>
+                            )}
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+
+            {/* Tab: 记忆 */}
+            {rightTab === "memory" && (
+              <div className="memory-section">
+                {memoryTotal > 0 ? (
+                  <>
+                    <div className="memory-body">
+                      {memoryEpisodes.map((e) => (
+                        <div key={e.id} className="memory-item">
+                          <div className="memory-item-head">
+                            <span
+                              className={`memory-role memory-role-${e.role === "user" ? "user" : "assistant"}`}
+                            >
+                              {e.role === "user" ? "用户" : "Agent"}
                             </span>
-                            <div className="stats-tool-bar-wrap">
+                            <span className="memory-time">
+                              {formatMsgTime(e.ts)}
+                            </span>
+                            <button
+                              type="button"
+                              className="memory-del"
+                              title="删除该条记忆"
+                              onClick={() => removeMemory(e.id)}
+                            >
+                              ×
+                            </button>
+                          </div>
+                          <p className="memory-content">{e.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="memory-clear"
+                      onClick={clearAllMemory}
+                    >
+                      清空全部记忆
+                    </button>
+                  </>
+                ) : (
+                  <p className="panel-empty">暂无记忆</p>
+                )}
+              </div>
+            )}
+
+            {/* Tab: 日志 */}
+            {rightTab === "logs" && (
+              <div className="logs-section">
+                {stats && (
+                  <div className="stats-section">
+                    <div className="stats-grid">
+                      <div className="stats-cell">
+                        <span className="stats-num">{stats.totalRuns}</span>
+                        <span className="stats-label">总运行</span>
+                      </div>
+                      <div className="stats-cell">
+                        <span className="stats-num stats-ok">
+                          {Math.round(stats.successRate * 100)}%
+                        </span>
+                        <span className="stats-label">成功率</span>
+                      </div>
+                      <div className="stats-cell">
+                        <span className="stats-num">{formatDuration(stats.totalDurationMs)}</span>
+                        <span className="stats-label">总耗时</span>
+                      </div>
+                      <div className="stats-cell">
+                        <span className="stats-num">
+                          {stats.avgDurationMs ? formatDuration(stats.avgDurationMs) : "—"}
+                        </span>
+                        <span className="stats-label">平均耗时</span>
+                      </div>
+                    </div>
+                    <div className="stats-sub-title">最近 7 天运行</div>
+                    <div className="stats-days">
+                      {stats.byDay.map((d) => {
+                        const max = Math.max(...stats.byDay.map((x) => x.runs), 1);
+                        return (
+                          <div key={d.day} className="stats-day" title={`${d.day}：${d.runs} 次`}>
+                            <div className="stats-day-bar-wrap">
                               <div
-                                className="stats-tool-bar"
-                                style={{ width: `${(t.count / max) * 100}%` }}
+                                className="stats-day-bar"
+                                style={{ height: `${Math.max((d.runs / max) * 100, d.runs > 0 ? 8 : 2)}%` }}
                               />
                             </div>
-                            <span className="stats-tool-count">{t.count}</span>
+                            <span className="stats-day-label">{d.day.slice(3)}</span>
                           </div>
                         );
                       })}
                     </div>
-                  )}
-                </div>
-              )}
-              <button
-                type="button"
-                className="stats-toggle"
-                onClick={() => {
-                  setStatsOpen((v) => !v);
-                  if (!statsOpen) refreshStats();
-                }}
-              >
-                {statsOpen ? "收起统计" : "查看统计"}
-              </button>
-            </div>
-            <div className="audit-section">
-              <div className="panel-title audit-head">
-                <h2>审批历史</h2>
-                <span className="panel-count">{auditTotal}</span>
-              </div>
-              {auditOpen && (
-                <>
-                  <div className="audit-filters">
-                    <select
-                      value={auditTool}
-                      onChange={(e) => {
-                        setAuditTool(e.target.value);
-                        setAuditOffset(0);
-                        refreshAudits();
-                      }}
-                      aria-label="按工具筛选"
-                    >
-                      <option value="">全部工具</option>
-                      {Object.entries(TOOL_META).map(([key, meta]) => (
-                        <option key={key} value={key}>
-                          {meta.label}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={auditAction}
-                      onChange={(e) => {
-                        setAuditAction(e.target.value);
-                        setAuditOffset(0);
-                        refreshAudits();
-                      }}
-                      aria-label="按动作筛选"
-                    >
-                      <option value="">全部动作</option>
-                      {Object.entries(AUDIT_ACTION_LABELS).map(([key, label]) => (
-                        <option key={key} value={key}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {audits.length > 0 && (
-                    <div className="audit-body">
-                      {audits.map((a) => (
-                        <div
-                          key={a.id}
-                          className={`audit-item audit-${a.action}`}
-                        >
-                          <div className="audit-item-head">
-                            <span className="audit-tool">
-                              {TOOL_META[a.toolName]?.label ?? a.toolName}
-                            </span>
-                            <span className="audit-action">
-                              {AUDIT_ACTION_LABELS[a.action] ?? a.action}
-                            </span>
-                            <span className="audit-time">
-                              {formatMsgTime(a.ts)}
-                            </span>
-                          </div>
-                          {a.reason && (
-                            <div className="audit-reason">{a.reason}</div>
-                          )}
-                          <code className="audit-args">
-                            {a.args?.slice(0, 100)}
-                          </code>
-                        </div>
-                      ))}
-                      <div className="audit-footer">
-                        <button
-                          type="button"
-                          className="audit-page"
-                          disabled={auditOffset === 0}
-                          onClick={() => {
-                            setAuditOffset((o) => Math.max(0, o - 50));
-                            refreshAudits();
-                          }}
-                        >
-                          更新
-                        </button>
-                        <button
-                          type="button"
-                          className="audit-page"
-                          disabled={auditOffset + 50 >= auditTotal}
-                          onClick={() => {
-                            setAuditOffset((o) => o + 50);
-                            refreshAudits();
-                          }}
-                        >
-                          更早
-                        </button>
-                        <button
-                          type="button"
-                          className="audit-clear"
-                          onClick={clearAudits}
-                        >
-                          清空历史
-                        </button>
+                    <div className="stats-sub-title">工具使用排行</div>
+                    {stats.toolRanking.length === 0 ? (
+                      <p className="stats-empty">暂无工具调用</p>
+                    ) : (
+                      <div className="stats-tools">
+                        {stats.toolRanking.slice(0, 6).map((t) => {
+                          const max = stats.toolRanking[0]?.count ?? 1;
+                          return (
+                            <div key={t.name} className="stats-tool">
+                              <span className="stats-tool-name">
+                                {TOOL_META[t.name]?.label ?? t.name}
+                              </span>
+                              <div className="stats-tool-bar-wrap">
+                                <div
+                                  className="stats-tool-bar"
+                                  style={{ width: `${(t.count / max) * 100}%` }}
+                                />
+                              </div>
+                              <span className="stats-tool-count">{t.count}</span>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  )}
-                  {audits.length === 0 && (
-                    <p className="audit-empty">暂无审批记录</p>
-                  )}
-                </>
-              )}
-              <button
-                type="button"
-                className="audit-toggle"
-                onClick={() => {
-                  setAuditOpen((v) => !v);
-                  if (!auditOpen) refreshAudits();
-                }}
-              >
-                {auditOpen ? "收起历史" : "查看历史"}
-              </button>
-            </div>
-            {todos.length > 0 && (
-              <div className="todo-section">
-                <div className="panel-title">
-                  <h2>任务计划</h2>
-                  <span className="panel-count">
-                    {doneCount}/{todos.length}
-                  </span>
-                </div>
-                <div className="todo-progress">
-                  <div className="todo-progress-track">
-                    <div
-                      className="todo-progress-fill"
-                      style={{ width: `${todoPct}%` }}
-                    />
+                    )}
                   </div>
-                  <span className="todo-progress-label">{todoPct}%</span>
-                </div>
-                <ol className="todo-list">
-                  {todos.map((t) => (
-                    <li
-                      key={t.id}
-                      draggable
-                      className={`todo-item todo-${t.status}`}
-                      title="拖拽调整顺序"
-                      onDragStart={(e) => {
-                        todoDragRef.current = t.id;
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        handleTodoDrop(t.id);
-                      }}
-                      onDragEnd={() => {
-                        todoDragRef.current = null;
-                      }}
-                    >
-                      <span className="todo-mark" aria-hidden="true">
-                        {t.status === "completed" ? "✓" : ""}
-                      </span>
-                      <div className="todo-body">
-                        <div className="todo-title">{t.title}</div>
-                        {t.detail && (
-                          <div className="todo-detail">{t.detail}</div>
+                )}
+                {runLogs.length > 0 ? (
+                  <div className="logs-body">
+                    {runLogs.map((l) => (
+                      <div
+                        key={l.id}
+                        className={`log-item ${l.error ? "log-item-error" : l.stopped ? "log-item-stopped" : "log-item-done"}`}
+                      >
+                        <div className="log-item-head">
+                          <span className="log-title">{l.title || "未命名会话"}</span>
+                          <span className="log-state">
+                            {l.error ? "错误" : l.stopped ? "停止" : "完成"}
+                          </span>
+                        </div>
+                        <div className="log-item-meta">
+                          <span>{formatMsgTime(l.startedAt)}</span>
+                          <span>{formatDuration(l.durationMs)}</span>
+                          <span>{l.messageCount} 条消息</span>
+                        </div>
+                        {l.error && (
+                          <p className="log-error">{l.error.slice(0, 140)}</p>
                         )}
                       </div>
-                      <span className="todo-state">
-                        {TODO_STATUS_LABELS[t.status]}
-                      </span>
-                      <button
-                        type="button"
-                        className="todo-del"
-                        title="删除该步骤"
-                        aria-label="删除该步骤"
-                        onClick={() => removeTodo(t.id)}
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ol>
-                <div className="todo-append">
-                  {todoAppendOpen ? (
-                    <input
-                      className="todo-append-input"
-                      value={todoAppendText}
-                      autoFocus
-                      placeholder="新步骤名称，Enter 添加"
-                      onChange={(e) => setTodoAppendText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") appendTodo();
-                        if (e.key === "Escape") {
-                          setTodoAppendOpen(false);
-                          setTodoAppendText("");
-                        }
-                      }}
-                      onBlur={appendTodo}
-                    />
-                  ) : (
+                    ))}
                     <button
                       type="button"
-                      className="todo-append-btn"
-                      onClick={() => setTodoAppendOpen(true)}
+                      className="logs-clear"
+                      onClick={clearRunLogs}
                     >
-                      ＋ 添加步骤
+                      清空日志
                     </button>
-                  )}
+                  </div>
+                ) : (
+                  <p className="panel-empty">暂无运行记录</p>
+                )}
+                <div className="panel-actions">
+                  <button
+                    type="button"
+                    className="panel-action"
+                    onClick={refreshRunLogs}
+                  >
+                    刷新日志
+                  </button>
+                  <button
+                    type="button"
+                    className="panel-action"
+                    onClick={refreshStats}
+                  >
+                    刷新统计
+                  </button>
                 </div>
               </div>
             )}
-            {cards.length === 0 ? (
-              <p className="panel-empty">
-                Agent 调用工具时会在这里显示执行卡片。
-              </p>
-            ) : (
-              <ul className="card-list">
-                {cards.map((card) => (
-                  <li
-                    key={card.id}
-                    className={`card card-${card.status} ${card.status === "running" ? "card-indeterminate" : ""}`}
+
+            {/* Tab: 审计 */}
+            {rightTab === "audit" && (
+              <div className="audit-section">
+                <div className="audit-filters">
+                  <select
+                    value={auditTool}
+                    onChange={(e) => {
+                      setAuditTool(e.target.value);
+                      setAuditOffset(0);
+                      refreshAudits();
+                    }}
+                    aria-label="按工具筛选"
                   >
-                    <div className="card-head">
-                      <span className={`card-badge card-badge-${card.status}`}>
-                        {TOOL_META[card.toolName]?.type ?? "工具"}
-                      </span>
-                      <span className="card-status" aria-hidden="true" />
-                      <span className="card-name">
-                        {TOOL_META[card.toolName]?.label ?? card.toolName}
-                      </span>
-                      <span
-                        className={`card-state ${toolCardStateClass(card)}`}
-                        title={card.approval?.reason}
+                    <option value="">全部工具</option>
+                    {Object.entries(TOOL_META).map(([key, meta]) => (
+                      <option key={key} value={key}>
+                        {meta.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={auditAction}
+                    onChange={(e) => {
+                      setAuditAction(e.target.value);
+                      setAuditOffset(0);
+                      refreshAudits();
+                    }}
+                    aria-label="按动作筛选"
+                  >
+                    <option value="">全部动作</option>
+                    {Object.entries(AUDIT_ACTION_LABELS).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {audits.length > 0 ? (
+                  <div className="audit-body">
+                    {audits.map((a) => (
+                      <div
+                        key={a.id}
+                        className={`audit-item audit-${a.action}`}
                       >
-                        {toolCardStateText(card)}
-                      </span>
-                    </div>
-                    <code className="card-args">
-                      {JSON.stringify(card.args)?.slice(0, 120)}
-                    </code>
-                    {card.result && (
-                      <>
-                        <button
-                          type="button"
-                          className={`card-expand ${expandedCards.has(card.id) ? "card-expand-open" : ""}`}
-                          onClick={() => toggleCard(card.id)}
-                        >
-                          {expandedCards.has(card.id) ? "收起结果" : "查看结果"}
-                        </button>
-                        {expandedCards.has(card.id) && (
-                          <pre className="card-result">{card.result}</pre>
+                        <div className="audit-item-head">
+                          <span className="audit-tool">
+                            {TOOL_META[a.toolName]?.label ?? a.toolName}
+                          </span>
+                          <span className="audit-action">
+                            {AUDIT_ACTION_LABELS[a.action] ?? a.action}
+                          </span>
+                          <span className="audit-time">
+                            {formatMsgTime(a.ts)}
+                          </span>
+                        </div>
+                        {a.reason && (
+                          <div className="audit-reason">{a.reason}</div>
                         )}
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ul>
+                        <code className="audit-args">
+                          {a.args?.slice(0, 100)}
+                        </code>
+                      </div>
+                    ))}
+                    <div className="audit-footer">
+                      <button
+                        type="button"
+                        className="audit-page"
+                        disabled={auditOffset === 0}
+                        onClick={() => {
+                          setAuditOffset((o) => Math.max(0, o - 50));
+                          refreshAudits();
+                        }}
+                      >
+                        更新
+                      </button>
+                      <button
+                        type="button"
+                        className="audit-page"
+                        disabled={auditOffset + 50 >= auditTotal}
+                        onClick={() => {
+                          setAuditOffset((o) => o + 50);
+                          refreshAudits();
+                        }}
+                      >
+                        更早
+                      </button>
+                      <button
+                        type="button"
+                        className="audit-clear"
+                        onClick={clearAudits}
+                      >
+                        清空历史
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="panel-empty">暂无审批记录</p>
+                )}
+              </div>
             )}
           </div>
         </aside>
       </main>
+
+      {/* Status Bar */}
+      <footer className="status-bar">
+        <span className={`status-bar-dot ${busy ? "status-bar-dot-busy" : ""}`} />
+        <span>{busy ? "执行中" : "空闲"}</span>
+        <span style={{ marginLeft: "auto" }}>claude-sonnet-4-5</span>
+        <span>·</span>
+        <span>~/agent-workdir</span>
+      </footer>
     </div>
   );
 }

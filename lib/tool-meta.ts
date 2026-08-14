@@ -26,6 +26,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   read_file: { label: "读取文件", type: "文件", capability: "readonly" },
   write_file: { label: "写入文件", type: "文件", capability: "readwrite", sensitive: true },
   append_file: { label: "追加写入", type: "文件", capability: "readwrite" },
+  // coding 专属：基于精确文本替换的局部编辑（风格参考 pi-coding-agent 的 edit 工具），work 形态下不注入
+  edit_file: { label: "精准编辑", type: "文件", capability: "readwrite", sensitive: true, surface: "coding" },
   create_dir: { label: "创建目录", type: "文件", capability: "readwrite" },
   move_file: { label: "移动/重命名", type: "文件", capability: "readwrite" },
   copy_file: { label: "复制文件", type: "文件", capability: "readwrite" },
@@ -34,10 +36,14 @@ export const TOOL_META: Record<string, ToolMeta> = {
   todo_create: { label: "创建任务计划", type: "任务", capability: "readonly" },
   todo_modify: { label: "更新任务计划", type: "任务", capability: "readonly" },
   todo_list: { label: "查看任务计划", type: "任务", capability: "readonly" },
-  web_search: { label: "网页搜索", type: "网络", capability: "readonly" },
-  fetch_url: { label: "抓取网页", type: "网络", capability: "readonly" },
+  // work 专属：联网检索（办公调研/资料查阅核心），coding 形态下不注入
+  web_search: { label: "网页搜索", type: "网络", capability: "readonly", surface: "work" },
+  fetch_url: { label: "抓取网页", type: "网络", capability: "readonly", surface: "work" },
   search_files: { label: "搜索文件内容", type: "文件", capability: "readonly" },
-  run_bash: { label: "执行命令", type: "系统", capability: "readwrite", sensitive: true },
-  env_info: { label: "环境信息", type: "系统", capability: "readonly" },
-  port_check: { label: "端口查询", type: "系统", capability: "readonly" },
+  // 按文件名 glob 查找文件（与 search_files 互补，参考 pi-coding-agent 的 find）
+  find: { label: "查找文件", type: "文件", capability: "readonly" },
+  // coding 专属：命令执行 / 环境与端口调试（编码调试核心），work 形态下不注入
+  run_bash: { label: "执行命令", type: "系统", capability: "readwrite", sensitive: true, surface: "coding" },
+  env_info: { label: "环境信息", type: "系统", capability: "readonly", surface: "coding" },
+  port_check: { label: "端口查询", type: "系统", capability: "readonly", surface: "coding" },
 };

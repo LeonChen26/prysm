@@ -101,16 +101,20 @@ console.log("\n== capability 筛选：readwrite ==");
   expectEq("capability=readwrite 过滤结果", rw, ["custom_new", "run_bash", "write_file"]);
 }
 
-console.log("\n== surface 筛选（TOOL_META 中目前未设置 surface，未知工具均通过） ==");
+console.log("\n== surface 筛选（TOOL_META 标注 surface 后按形态剔除） ==");
 {
   const reg = new ToolRegistry();
-  const tools = [mkTool("list_dir"), mkTool("custom_x")];
+  const tools = [
+    mkTool("list_dir"),   // 通用（未标 surface）→ 两形态都保留
+    mkTool("web_search"), // surface=work → 仅 work 保留
+    mkTool("run_bash"),   // surface=coding → 仅 coding 保留
+    mkTool("custom_x"),   // 无 meta → 不被剔除，均保留
+  ];
   reg.register({ id: "t", load: async () => tools });
   const work = (await reg.resolve({ surface: "work" })).map((t) => t.name).sort();
   const coding = (await reg.resolve({ surface: "coding" })).map((t) => t.name).sort();
-  // 因现有 TOOL_META 均未设置 surface，matchesFilter 对 surface filter 一律放行
-  expectEq("surface=work 结果（meta 未设置均保留）", work, ["custom_x", "list_dir"]);
-  expectEq("surface=coding 结果（meta 未设置均保留）", coding, ["custom_x", "list_dir"]);
+  expectEq("surface=work 结果", work, ["custom_x", "list_dir", "web_search"]);
+  expectEq("surface=coding 结果", coding, ["custom_x", "list_dir", "run_bash"]);
 }
 
 console.log("\n== capability + surface 联合筛选 ==");

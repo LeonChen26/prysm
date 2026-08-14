@@ -8,7 +8,7 @@ import { memoryRecallK, resetMemoryTracking, retrieveEpisodes } from "./memory";
 import { retrieveRagText } from "./rag";
 import { isAutoApproved, isDenied } from "./policy";
 import { assessRisk, toolSource } from "./risk";
-import { getSessionMessages } from "./session";
+import { getSession, getSessionMessages } from "./session";
 import { resolveAgentTools } from "./tools/registry";
 import { setSpawnSubagentImpl } from "./tools";
 import type { SubagentSpec } from "./subagent";
@@ -28,13 +28,40 @@ const KEY_ENV: Record<string, string> = {
 };
 
 /**
- * 基础系统提示词（Phase 1b 动态化）
- * 多工作区下工作区根不再固定，按会话可访问的工作区根动态注入。
+ * 基础系统提示词（Phase 1b 动态化；Phase 7 按会话形态 work/coding 分化）
+ * 多工作区下工作区根不再固定，按会话可访问的工作区根动态注入；
+ * surface 决定角色定位：work 偏办公自动化，coding 偏编码工程（风格参考 pi-coding-agent：
+ * 专家定位一句话 + 显式"可用工具"清单 + 精炼工作准则）。
  */
-export function buildSystemPrompt(workspaceRoots: string[]): string {
+export function buildSystemPrompt(
+  workspaceRoots: string[],
+  surface?: "work" | "coding",
+): string {
   const rootsText =
     workspaceRoots.length > 0 ? workspaceRoots.join("\n") : "（未配置）";
-  return `你是 Prysm —— 一个能自主完成任务的通用助手。
+  // 按形态取内置工具清单：通用工具（未标 surface）+ 该形态专属工具
+  const effSurface = surface ?? "coding";
+  const toolsText = Object.entries(TOOL_META)
+    .filter(([, m]) => !m.surface || m.surface === effSurface)
+    .map(
+      ([name, m]) =>
+        `- ${name}: ${m.label}${m.sensitive ? "（敏感，操作需审批）" : ""}`,
+    )
+    .join("\n");
+  const persona =
+    surface === "work"
+      ? `你是 Prysm 的 Work（办公自动化）助手，专注处理办公类任务：文档撰写与整理、资料检索与调研、数据整理与报告、邮件与纪要等事务性工作。
+定位：以可交付的成果为导向 —— 报告、清单、表格、成文文档；动手前先明确目标与交付物形态。
+原则：需要最新外部信息的任务，优先使用联网检索（web_search / fetch_url）并标注来源。`
+      : surface === "coding"
+        ? `你是 Prysm 的 Coding（编码）助手，一名专家级编码助理，工作在 Prysm 编码 harness 中。
+定位：代码编写与重构、调试与排错、命令执行、环境配置、项目结构与构建理解。
+原则：用工具自证结论 —— 能执行就先执行验证、能校验就先校验再汇报；涉及文件时清晰标注路径。`
+        : `你是 Prysm —— 一个能自主完成任务的通用助手。`;
+  return `${persona}
+
+可用工具（当前形态，除内置工具外你还可使用已启用的 Skill 与已连接的 MCP server 提供的自定义工具）：
+${toolsText}
 
 你拥有以下能力：
 - 通过工具在以下可访问的工作区根目录内读取、写入、浏览文件：
@@ -43,9 +70,9 @@ ${rootsText}
 - 具备跨会话的情景记忆：每次对话开始前，系统会把从以往会话中检索到的相关信息以【历史情景】的形式注入给你，这就是你的长期记忆，请直接使用其中的事实（如用户偏好、之前完成的任务、文件内容），不要声称自己"没有记忆"。
 - 可通过 web_search 搜索互联网、用 fetch_url 抓取网页全文，获取实时信息（时事、文档、价格、版本号等）。涉及需要最新数据的问题，先搜索再回答，并标注信息来源。
 
-工作方式：
-1. 理解用户意图后，先规划步骤，再调用工具逐步完成。
-2. 对需要多个步骤、可能改动文件或调用外部工具（MCP/网络）的复杂任务，先用 plan_propose 产出结构化计划并等待用户确认，确认后再执行；简单任务可跳过。
+工作准则：
+1. 保持简洁，聚焦结论；涉及文件时清晰标注路径。
+2. 理解用户意图后，先规划步骤，再调用工具逐步完成；复杂任务先用 plan_propose 产出结构化计划并等待用户确认，确认后再执行；简单任务可跳过。
 3. 对已进入执行的任务，先用 todo_create 将任务拆解为清晰的步骤清单；开始执行某一步前用 todo_modify 把它标记为 in_progress，每完成一步标记为 completed；中途如需调整清单，用 todo_modify 追加或修改，不要重复调用 todo_create 覆盖整个清单。
 4. 工具调用失败时，分析错误原因，尝试换个参数或换一种方式重试。
 5. 任务完成后，用 verify_file 自检关键交付物（确认文件存在、内容符合预期），校验失败时分析原因并修正后重新校验，再向用户总结做了什么、结果如何。
@@ -305,7 +332,9 @@ export async function getAgent(sessionId: string): Promise<Agent> {
     );
   }
   const messages = getSessionMessages(sessionId);
-  const basePrompt = buildSystemPrompt(getAllowedRoots());
+  // Phase 7：会话形态驱动提示词角色定位与工具集筛选
+  const surface = getSession(sessionId)?.surface ?? "coding";
+  const basePrompt = buildSystemPrompt(getAllowedRoots(), surface);
   // Phase 4：已启用技能的正文拼入系统提示词
   const skillPrompt = buildSkillPrompt();
   const systemPrompt = skillPrompt ? `${basePrompt}\n\n${skillPrompt}` : basePrompt;
@@ -313,8 +342,8 @@ export async function getAgent(sessionId: string): Promise<Agent> {
     initialState: {
       systemPrompt,
       model,
-      // Phase 3：工具集动态解析 —— 内置工具 + 已连接的 MCP server 工具
-      tools: await resolveAgentTools(),
+      // Phase 3+7：工具集动态解析 —— 内置工具 + 已连接的 MCP server 工具，按会话形态筛选
+      tools: await resolveAgentTools({ surface }),
       messages,
     },
     streamFn: models.streamSimple.bind(models),

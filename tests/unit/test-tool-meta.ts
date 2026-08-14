@@ -11,9 +11,10 @@ function fail(msg: string): never {
   throw new Error(msg);
 }
 
-const SENSITIVE_EXPECTED = new Set(["write_file", "delete_file", "run_bash"]);
+const SENSITIVE_EXPECTED = new Set(["write_file", "edit_file", "delete_file", "run_bash"]);
 const READWRITE_EXPECTED = new Set([
   "write_file",
+  "edit_file",
   "append_file",
   "create_dir",
   "move_file",
@@ -38,7 +39,7 @@ const READONLY_EXPECTED = new Set([
 console.log("== TOOL_META 基本完整性 ==");
 const count = Object.keys(TOOL_META).length;
 console.log(`  ✓ 共登记 ${count} 个工具`);
-if (count < 18) fail(`登记工具数过少，期望至少 18，实际 ${count}`);
+if (count < 19) fail(`登记工具数过少，期望至少 19，实际 ${count}`);
 
 console.log("\n== 敏感工具标记（sensitive=true） ==");
 for (const name of Object.keys(TOOL_META)) {
