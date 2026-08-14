@@ -36,6 +36,7 @@ import {
   formatMsgTime,
   formatRelTime,
   GROUP_ORDER,
+  addUsage,
   clearToolCards,
   loadToolCards,
   readSSE,
@@ -53,6 +54,8 @@ import {
   type ToolApproval,
   type ToolCard,
   type UiMessage,
+  type UsageInfo,
+  type ContextAnalysis,
 } from "./chat-types";
 
 /** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
@@ -78,6 +81,131 @@ function CardResultView({ result }: { result: string }) {
   ) : (
     <pre className="card-result">{result}</pre>
   );
+}
+
+/** 单张工具卡片（会话区内联与右侧面板复用） */
+function ToolCardView({
+  card,
+  resultOpen,
+  onToggleResult,
+}: {
+  card: ToolCard;
+  resultOpen: boolean;
+  onToggleResult: () => void;
+}) {
+  return (
+    <div
+      className={`card card-${card.status} ${card.status === "running" ? "card-indeterminate" : ""}`}
+    >
+      <div className="card-head">
+        <span className={`card-badge card-badge-${card.status}`}>
+          {TOOL_META[card.toolName]?.type ?? "工具"}
+        </span>
+        <span className="card-status" aria-hidden="true" />
+        <span className="card-name">
+          {TOOL_META[card.toolName]?.label ?? card.toolName}
+        </span>
+        <span
+          className={`card-state ${toolCardStateClass(card)}`}
+          title={card.approval?.reason}
+        >
+          {toolCardStateText(card)}
+        </span>
+      </div>
+      <code className="card-args">{JSON.stringify(card.args)?.slice(0, 120)}</code>
+      {card.result && (
+        <>
+          <button
+            type="button"
+            className={`card-expand ${resultOpen ? "card-expand-open" : ""}`}
+            onClick={onToggleResult}
+          >
+            {resultOpen ? "收起结果" : "查看结果"}
+          </button>
+          {resultOpen && <CardResultView result={card.result} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 一轮问答的工具调用组摘要信息（工具名去重 + 总耗时 + 成功/失败计数） */
+function toolGroupSummary(cards: ToolCard[]): {
+  names: string;
+  totalMs: number;
+  done: number;
+  err: number;
+} {
+  const names = [
+    ...new Set(cards.map((c) => TOOL_META[c.toolName]?.label ?? c.toolName)),
+  ];
+  const totalMs = cards.reduce((s, c) => s + (c.elapsedMs ?? 0), 0);
+  const done = cards.filter((c) => c.status === "done").length;
+  const err = cards.filter((c) => c.status === "error").length;
+  return { names: names.join("、"), totalMs, done, err };
+}
+
+/** 工具卡片组：一轮问答的多次工具调用折叠为一条摘要，点击展开 */
+function ToolCardGroup({
+  cards,
+  expanded,
+  onToggle,
+  expandedCards,
+  onToggleCard,
+}: {
+  cards: ToolCard[];
+  expanded: boolean;
+  onToggle: () => void;
+  expandedCards: Set<string>;
+  onToggleCard: (id: string) => void;
+}) {
+  const { names, totalMs, done, err } = toolGroupSummary(cards);
+  return (
+    <div className={`tool-group ${expanded ? "tool-group-open" : ""}`}>
+      <button type="button" className="tool-group-head" onClick={onToggle}>
+        <span className="tool-group-badge" aria-hidden="true">
+          {cards.length}
+        </span>
+        <span className="tool-group-summary">{names}</span>
+        {totalMs > 0 && (
+          <span className="tool-group-time">{formatDuration(totalMs)}</span>
+        )}
+        <span className={`tool-group-state ${err > 0 ? "has-err" : ""}`}>
+          {err > 0 ? `✓${done} · ✗${err}` : `✓${done}`}
+        </span>
+        <span className="tool-group-chevron" aria-hidden="true">
+          {expanded ? "▾" : "▸"}
+        </span>
+      </button>
+      {expanded && (
+        <div className="tool-group-body">
+          {cards.map((card) => (
+            <ToolCardView
+              key={card.id}
+              card={card}
+              resultOpen={expandedCards.has(card.id)}
+              onToggleResult={() => onToggleCard(card.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 按问答轮分组工具卡片（无 turnNo 的旧数据归入最后一轮） */
+function groupCardsByTurn(
+  cards: ToolCard[],
+  userCount: number,
+): Map<number, ToolCard[]> {
+  const map = new Map<number, ToolCard[]>();
+  for (const card of cards) {
+    const t = card.turnNo && card.turnNo >= 1 ? card.turnNo : userCount;
+    const group = map.get(t) ?? [];
+    group.push(card);
+    map.set(t, group);
+  }
+  return map;
 }
 
 /** 空状态快捷任务入口（Coding 形态） */
@@ -175,6 +303,8 @@ export function ChatPanel() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  /** 工具卡片组（按轮次 turnNo）展开状态 */
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   /** 会话多选批量删除模式 */
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -229,8 +359,14 @@ export function ChatPanel() {
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   /** 左栏视图：会话列表 / 文件浏览器 / 设置 */
   const [activityView, setActivityView] = useState<"sessions" | "files" | "settings">("sessions");
-  /** 右栏 Tab：工具卡片 / 记忆 / 日志 / 审计 */
-  const [rightTab, setRightTab] = useState<"cards" | "memory" | "logs" | "audit">("cards");
+  /** 右栏 Tab：工具卡片 / 记忆 / 日志 / 审计 / 上下文 */
+  const [rightTab, setRightTab] = useState<
+    "cards" | "memory" | "logs" | "audit" | "context"
+  >("cards");
+  /** 本轮问答的累计 turn 级 token 用量（turn_end 事件累加） */
+  const [runUsage, setRunUsage] = useState<UsageInfo | null>(null);
+  /** 上下文构成分析（GET /api/context 结果） */
+  const [contextAnalysis, setContextAnalysis] = useState<ContextAnalysis | null>(null);
   /** 工作区文件浏览器 */
   const [wbDirs, setWbDirs] = useState<
     Record<string, { name: string; isDir: boolean; size: number; mtime: number }[]>
@@ -251,6 +387,10 @@ export function ChatPanel() {
   const [msgSelected, setMsgSelected] = useState<Set<number>>(new Set());
   /** 消息编辑：正在编辑的用户消息索引（-1 表示非编辑态） */
   const [editingIndex, setEditingIndex] = useState(-1);
+  /** 人工评分：按消息索引记录 👍/👎（仅本地态，后端以 /api/insights/score 持久化） */
+  const [ratings, setRatings] = useState<Record<number, "good" | "bad">>({});
+  /** 评语草稿：被评分后出现的可选评语输入，按消息索引存 */
+  const [ratingComments, setRatingComments] = useState<Record<number, string>>({});
   /** 侧栏宽度（可拖拽调宽，持久化到 localStorage）：左栏 160-380，中间聊天区 480-960 */
   const [leftW, setLeftW] = useState(220);
   const [midW, setMidW] = useState(720);
@@ -266,6 +406,8 @@ export function ChatPanel() {
   const stickRef = useRef(true);
   /** 最近一次程序性滚动的时间戳（用于忽略其引发的 scroll 事件） */
   const programmaticScrollRef = useRef(0);
+  /** 当前会话 user 消息数量（工具卡片轮次标签 turnNo = 会话内第几条 user 消息） */
+  const userCountRef = useRef(0);
 
   // 应用主题到 <html> 并持久化（React 19 hydration 下 useState 惰性初始化不可靠，统一在 mount 后读取）
   const applyTheme = useCallback((t: "light" | "dark") => {
@@ -676,6 +818,18 @@ export function ChatPanel() {
     }
   }, []);
 
+  /** 拉取会话上下文构成分析 */
+  const refreshContext = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const r = await fetch(`/api/context/${sessionId}`);
+      const data = await r.json();
+      if (Array.isArray(data?.categories)) setContextAnalysis(data);
+    } catch {
+      /* 静默 */
+    }
+  }, [sessionId]);
+
   /** 删除单条情景记忆 */
   const removeMemory = useCallback(
     async (id: number) => {
@@ -1015,6 +1169,11 @@ export function ChatPanel() {
     stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
   }, []);
 
+  // 同步当前会话 user 消息数量（工具卡片轮次标签 turnNo 的基准）
+  useEffect(() => {
+    userCountRef.current = messages.filter((m) => m.role === "user").length;
+  }, [messages]);
+
   // 消息 / 卡片变化时：仅当用户停留在底部才自动滚动跟随
   useEffect(() => {
     const el = chatScrollRef.current;
@@ -1040,6 +1199,8 @@ export function ChatPanel() {
     ) => {
       const t = text.trim();
       if (!t || busyRef.current) return;
+      if (appendUser) userCountRef.current += 1;
+      const turnNo = userCountRef.current;
       setError(null);
       // 恢复该会话已完成的工具卡片回顾；本轮的实时卡片随后由 tool_start/tool_end 追加
       // 注意：新会话时 sessionId 由服务端 session 事件确认，此处先以 override/sessionId 兜底
@@ -1048,6 +1209,7 @@ export function ChatPanel() {
       setTodos([]);
       setApprovals([]);
       setPlans([]);
+      setRunUsage(null);
       if (appendUser) {
         setMessages((m) => [
           ...m,
@@ -1128,6 +1290,7 @@ export function ChatPanel() {
                         args: ev.args,
                         status: "running",
                         startedAt: Date.now(),
+                        turnNo,
                       },
                     ],
               );
@@ -1151,6 +1314,10 @@ export function ChatPanel() {
               });
               if (ev.todos) setTodos(ev.todos);
               break;
+            case "turn_end": {
+              setRunUsage((prev) => addUsage(prev, ev.usage));
+              break;
+            }
             case "approval_required": {
               const id = ev.id;
               const toolName = ev.toolName;
@@ -1459,6 +1626,60 @@ export function ChatPanel() {
     [messages, sessionId, editingIndex],
   );
 
+  /** 人工评分：点击 👍/👎 切换（再次点击已选项则取消本地态），落库到 /api/insights/score */
+  const rateMessage = useCallback(
+    async (index: number, label: "good" | "bad") => {
+      if (!sessionId) return;
+      const current = ratings[index];
+      const nextLabel = current === label ? undefined : label;
+      setRatings((prev) => {
+        const next = { ...prev };
+        if (nextLabel) next[index] = nextLabel;
+        else delete next[index];
+        return next;
+      });
+      if (!nextLabel) return;
+      try {
+        const res = await fetch("/api/insights/score", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, label: nextLabel }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error ?? "评分失败");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [sessionId, ratings],
+  );
+
+  /** 提交可选评语（需先评分；关联同一 label 再次落库一条含 comment 的记录） */
+  const submitRatingComment = useCallback(
+    async (index: number) => {
+      const label = ratings[index];
+      const comment = ratingComments[index]?.trim();
+      if (!sessionId || !label || !comment) return;
+      try {
+        const res = await fetch("/api/insights/score", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, label, comment }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error ?? "评语保存失败");
+        }
+        setRatingComments((prev) => ({ ...prev, [index]: "" }));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [sessionId, ratings, ratingComments],
+  );
+
   /** 保存会话重命名 */
   const saveRename = useCallback(async () => {
     if (!renamingId) return;
@@ -1598,6 +1819,16 @@ export function ChatPanel() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** 折叠/展开某轮的工具卡片组 */
+  const toggleGroup = useCallback((turnNo: number) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(turnNo)) next.delete(turnNo);
+      else next.add(turnNo);
       return next;
     });
   }, []);
@@ -2425,13 +2656,14 @@ export function ChatPanel() {
                 )}
               </div>
             )}
-            {/* 本轮最后一条用户消息之后内联展示工具执行（实时） */}
+            {/* 每条用户消息后内联展示该轮工具调用组（折叠，可展开） */}
             {(() => {
-              let lastUserIndex = -1;
-              for (let i = 0; i < messages.length; i++) {
-                if (messages[i].role === "user") lastUserIndex = i;
-              }
-              const inlineVisible = cards.length > 0 && lastUserIndex >= 0;
+              const indexToTurn = new Map<number, number>();
+              messages.forEach((m, i) => {
+                if (m.role === "user") indexToTurn.set(i, indexToTurn.size + 1);
+              });
+              const userCount = indexToTurn.size;
+              const cardsByTurn = groupCardsByTurn(cards, userCount);
               return messages.map((m, i) => {
                 // 跳过"纯工具调用"的空 assistant 消息：content 仅含 toolCall、无正文，
                 // 在历史中不渲染空气泡（其动作已由工具卡片呈现）；仅保留正在流式的最新占位。
@@ -2447,6 +2679,7 @@ export function ChatPanel() {
                 // iMessage 气泡分组：连续同角色消息合并，仅组尾显示尾巴与头像
                 const groupEnd = !next || next.role !== m.role;
                 const groupMid = !!prev && prev.role === m.role && !!next && next.role === m.role;
+                const turnNo = indexToTurn.get(i) ?? 0;
               const longMsg = m.text.length > LONG_MSG_THRESHOLD;
               const msgCollapsed = longMsg && !longOpen.has(i);
               const cls = [
@@ -2543,6 +2776,7 @@ export function ChatPanel() {
                       <></>
                     )}
                     {groupEnd && m.text && (
+                      <>
                       <div className="msg-meta">
                         {m.timestamp ? (
                           <span className="msg-time">
@@ -2576,13 +2810,35 @@ export function ChatPanel() {
                             </button>
                           )}
                           {m.role === "assistant" && (
-                            <button
-                              type="button"
-                              className="msg-action"
-                              onClick={() => regenerate(i)}
-                            >
-                              重新生成
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="msg-action"
+                                onClick={() => regenerate(i)}
+                              >
+                                重新生成
+                              </button>
+                              <button
+                                type="button"
+                                className={`msg-action msg-action-rate ${
+                                  ratings[i] === "good" ? "msg-action-rated-good" : ""
+                                }`}
+                                title="回答有帮助"
+                                onClick={() => rateMessage(i, "good")}
+                              >
+                                👍
+                              </button>
+                              <button
+                                type="button"
+                                className={`msg-action msg-action-rate ${
+                                  ratings[i] === "bad" ? "msg-action-rated-bad" : ""
+                                }`}
+                                title="回答有问题"
+                                onClick={() => rateMessage(i, "bad")}
+                              >
+                                👎
+                              </button>
+                            </>
                           )}
                           <button
                             type="button"
@@ -2594,50 +2850,48 @@ export function ChatPanel() {
                           </button>
                         </div>
                       </div>
+                      {m.role === "assistant" && ratings[i] && (
+                        <div className="msg-rating-comment">
+                          <input
+                            type="text"
+                            className="msg-rating-input"
+                            placeholder="可选：补充一句评语…"
+                            value={ratingComments[i] ?? ""}
+                            onChange={(e) =>
+                              setRatingComments((prev) => ({
+                                ...prev,
+                                [i]: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") submitRatingComment(i);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="msg-action"
+                            onClick={() => submitRatingComment(i)}
+                          >
+                            保存评语
+                          </button>
+                        </div>
+                      )}
+                      </>
                     )}
                   </div>
                   </div>
-                  {inlineVisible && i === lastUserIndex && (
+                  {turnNo > 0 && cardsByTurn.has(turnNo) && (
                     <div className="inline-tools">
-                      {cards.map((card) => (
-                        <div
-                          key={card.id}
-                          className={`card card-${card.status} ${card.status === "running" ? "card-indeterminate" : ""}`}
-                        >
-                          <div className="card-head">
-                            <span className={`card-badge card-badge-${card.status}`}>
-                              {TOOL_META[card.toolName]?.type ?? "工具"}
-                            </span>
-                            <span className="card-status" aria-hidden="true" />
-                            <span className="card-name">
-                              {TOOL_META[card.toolName]?.label ?? card.toolName}
-                            </span>
-                            <span
-                              className={`card-state ${toolCardStateClass(card)}`}
-                              title={card.approval?.reason}
-                            >
-                              {toolCardStateText(card)}
-                            </span>
-                          </div>
-                          <code className="card-args">
-                            {JSON.stringify(card.args)?.slice(0, 120)}
-                          </code>
-                          {card.result && (
-                            <>
-                              <button
-                                type="button"
-                                className={`card-expand ${expandedCards.has(card.id) ? "card-expand-open" : ""}`}
-                                onClick={() => toggleCard(card.id)}
-                              >
-                                {expandedCards.has(card.id) ? "收起结果" : "查看结果"}
-                              </button>
-                              {expandedCards.has(card.id) && (
-                                <CardResultView result={card.result} />
-                              )}
-                            </>
-                          )}
-                        </div>
-                      ))}
+                      <ToolCardGroup
+                        cards={cardsByTurn.get(turnNo)!}
+                        expanded={
+                          expandedGroups.has(turnNo) ||
+                          (busy && turnNo === userCount)
+                        }
+                        onToggle={() => toggleGroup(turnNo)}
+                        expandedCards={expandedCards}
+                        onToggleCard={toggleCard}
+                      />
                     </div>
                   )}
                 </Fragment>
@@ -2932,6 +3186,12 @@ export function ChatPanel() {
             >
               审计
             </button>
+            <button
+              className={`panel-tab ${rightTab === "context" ? "panel-tab-active" : ""}`}
+              onClick={() => { setRightTab("context"); refreshContext(); }}
+            >
+              上下文
+            </button>
           </div>
           <div className="panel-scroll">
             {/* Tab: 工具卡片 */}
@@ -3061,47 +3321,29 @@ export function ChatPanel() {
                     Agent 调用工具时会在这里显示执行卡片。
                   </p>
                 ) : (
-                  <ul className="card-list">
-                    {cards.map((card) => (
-                      <li
-                        key={card.id}
-                        className={`card card-${card.status} ${card.status === "running" ? "card-indeterminate" : ""}`}
-                      >
-                        <div className="card-head">
-                          <span className={`card-badge card-badge-${card.status}`}>
-                            {TOOL_META[card.toolName]?.type ?? "工具"}
-                          </span>
-                          <span className="card-status" aria-hidden="true" />
-                          <span className="card-name">
-                            {TOOL_META[card.toolName]?.label ?? card.toolName}
-                          </span>
-                          <span
-                            className={`card-state ${toolCardStateClass(card)}`}
-                            title={card.approval?.reason}
-                          >
-                            {toolCardStateText(card)}
-                          </span>
-                        </div>
-                        <code className="card-args">
-                          {JSON.stringify(card.args)?.slice(0, 120)}
-                        </code>
-                        {card.result && (
-                          <>
-                            <button
-                              type="button"
-                              className={`card-expand ${expandedCards.has(card.id) ? "card-expand-open" : ""}`}
-                              onClick={() => toggleCard(card.id)}
-                            >
-                              {expandedCards.has(card.id) ? "收起结果" : "查看结果"}
-                            </button>
-                            {expandedCards.has(card.id) && (
-                              <CardResultView result={card.result} />
-                            )}
-                          </>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="card-list">
+                    {(() => {
+                      const userCount = messages.filter(
+                        (m) => m.role === "user",
+                      ).length;
+                      const cardsByTurn = groupCardsByTurn(cards, userCount);
+                      return [...cardsByTurn.entries()]
+                        .sort((a, b) => a[0] - b[0])
+                        .map(([turnNo, group]) => (
+                          <ToolCardGroup
+                            key={turnNo}
+                            cards={group}
+                            expanded={
+                              expandedGroups.has(turnNo) ||
+                              (busy && turnNo === userCount)
+                            }
+                            onToggle={() => toggleGroup(turnNo)}
+                            expandedCards={expandedCards}
+                            onToggleCard={toggleCard}
+                          />
+                        ));
+                    })()}
+                  </div>
                 )}
               </>
             )}
@@ -3370,6 +3612,115 @@ export function ChatPanel() {
                   </div>
                 ) : (
                   <p className="panel-empty">暂无审批记录</p>
+                )}
+              </div>
+            )}
+
+            {/* Tab: 上下文 */}
+            {rightTab === "context" && (
+              <div className="context-section">
+                {contextAnalysis ? (
+                  <>
+                    <div className="context-usage">
+                      <div className="context-block-head">
+                        <span className="context-block-label">真实 Token 用量</span>
+                        <span className="context-block-note">模型返回</span>
+                      </div>
+                      <div className="context-usage-grid">
+                        <div className="context-metric">
+                          <span className="context-metric-k">本轮输入</span>
+                          <span className="context-metric-v">
+                            {runUsage
+                              ? runUsage.input
+                              : contextAnalysis.lastUsage?.input ?? 0}
+                          </span>
+                        </div>
+                        <div className="context-metric">
+                          <span className="context-metric-k">本轮输出</span>
+                          <span className="context-metric-v">
+                            {runUsage
+                              ? runUsage.output
+                              : contextAnalysis.lastUsage?.output ?? 0}
+                          </span>
+                        </div>
+                        <div className="context-metric">
+                          <span className="context-metric-k">累计输入</span>
+                          <span className="context-metric-v">
+                            {contextAnalysis.usageTotals?.input ?? 0}
+                          </span>
+                        </div>
+                        <div className="context-metric">
+                          <span className="context-metric-k">累计成本</span>
+                          <span className="context-metric-v">
+                            ¥{(contextAnalysis.usageTotals?.cost?.total ?? 0).toFixed(4)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="context-compose">
+                      <div className="context-block-head">
+                        <span className="context-block-label">上下文构成</span>
+                        <span className="context-block-note">估算</span>
+                      </div>
+                      <div className="context-bar">
+                        {contextAnalysis.categories
+                          .filter((c) => c.estimatedTokens > 0)
+                          .map((c) => (
+                            <span
+                              key={c.key}
+                              className={`context-bar-seg context-bar-${c.key}`}
+                              style={{
+                                width: `${(c.estimatedTokens / Math.max(contextAnalysis.totalEstimatedTokens, 1)) * 100}%`,
+                              }}
+                              title={`${c.label}: ${c.estimatedTokens} token`}
+                            />
+                          ))}
+                      </div>
+                      <ul className="context-list">
+                        {contextAnalysis.categories.map((c) => (
+                          <li key={c.key} className="context-row">
+                            <span className={`context-dot context-dot-${c.key}`} />
+                            <span className="context-row-label">{c.label}</span>
+                            <span className="context-row-count">
+                              {c.count > 0 ? `${c.count} 项` : ""}
+                            </span>
+                            <span className="context-row-tokens">
+                              {c.estimatedTokens} tok
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="context-note">
+                        构成为字符估算（中文≈1 字/token，英文≈4 字符/token），
+                        非真实 tokenizer 输出；真实用量以「模型返回」为准。
+                      </p>
+                    </div>
+
+                    {contextAnalysis.memoryHits.length > 0 && (
+                      <div className="context-memory">
+                        <div className="context-block-head">
+                          <span className="context-block-label">本轮记忆命中</span>
+                          <span className="context-block-note">
+                            {contextAnalysis.memoryHits.length}/
+                            {contextAnalysis.memoryTotal}
+                          </span>
+                        </div>
+                        {contextAnalysis.memoryHits.map((h, i) => (
+                          <div key={i} className="context-memory-item">
+                            <span
+                              className={`context-memory-role ${h.role === "user" ? "is-user" : ""}`}
+                            >
+                              {h.role === "user" ? "用户" : "Agent"}
+                            </span>
+                            <p className="context-memory-content">{h.content}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="panel-empty">加载上下文分析中…</p>
                 )}
               </div>
             )}

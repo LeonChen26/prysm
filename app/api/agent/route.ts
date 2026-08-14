@@ -143,12 +143,32 @@ export async function POST(req: Request) {
       // 这里只做传输适配：订阅 bus，按会话隔离推送，SSE 行为不变。
       // tool_call 统计供运行统计概览（同样来自 bus，带 sessionId）。
       const toolCalls: Record<string, number> = {};
+      const usage = { input: 0, output: 0, cacheRead: 0, totalTokens: 0, cost: 0 };
       const unsubBus = core.eventBus.subscribe((event) => {
         const sid = (event as { sessionId?: string }).sessionId;
         if (sid && sid !== session.id) return;
-        if ((event as { type?: string }).type === "tool_end") {
+        const type = (event as { type?: string }).type;
+        if (type === "tool_end") {
           const name = (event as { toolName?: string }).toolName;
           if (name) toolCalls[name] = (toolCalls[name] ?? 0) + 1;
+        }
+        if (type === "turn_end") {
+          const u = (event as {
+            usage?: {
+              input?: number;
+              output?: number;
+              cacheRead?: number;
+              totalTokens?: number;
+              cost?: { total?: number };
+            };
+          }).usage;
+          if (u) {
+            usage.input += u.input ?? 0;
+            usage.output += u.output ?? 0;
+            usage.cacheRead += u.cacheRead ?? 0;
+            usage.totalTokens += u.totalTokens ?? 0;
+            usage.cost += u.cost?.total ?? 0;
+          }
         }
         send(event);
       });
@@ -213,7 +233,7 @@ export async function POST(req: Request) {
         } catch (err) {
           console.error("[session] 持久化失败:", err);
         }
-        // 运行日志（供前端查看最近执行记录）
+        // 运行日志（持久化到 insights.db，供前端查看最近执行记录与观测统计）
         logRun({
           sessionId: session.id,
           title: session.title,
@@ -222,6 +242,7 @@ export async function POST(req: Request) {
           messageCount: msgs.length,
           stopped,
           toolCalls,
+          usage,
           error:
             !aborted && runError
               ? runError instanceof Error

@@ -1326,6 +1326,48 @@ body.resizing {
   color: var(--success) !important;
 }
 
+/* 人工评分 👍/👎 */
+.msg-action-rate {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.msg-action-rated-good {
+  background: color-mix(in srgb, var(--success) 18%, transparent) !important;
+  color: var(--success) !important;
+}
+
+.msg-action-rated-bad {
+  background: color-mix(in srgb, var(--danger) 18%, transparent) !important;
+  color: var(--danger) !important;
+}
+
+/* 评分后出现的可选评语输入 */
+.msg-rating-comment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.msg-rating-input {
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  outline: none;
+  width: 220px;
+  transition: border-color 0.15s ease;
+}
+
+.msg-rating-input:focus {
+  border-color: var(--brand);
+}
+
 /* 消息顶部工具条：多选删除 */
 .msg-toolbar {
   display: flex;
@@ -2418,6 +2460,178 @@ body.resizing {
   padding: 8px 2px 0;
 }
 
+/* ---------- 上下文面板（Token 用量 + 构成） ---------- */
+.context-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.context-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.context-block-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.context-block-note {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.context-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.context-metric {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.context-metric-k {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.context-metric-v {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--surface-muted);
+}
+
+.context-bar-seg {
+  height: 100%;
+  flex-shrink: 0;
+}
+
+.context-bar-system { background: #9aa0a6; }
+.context-bar-memory { background: #3fa9a0; }
+.context-bar-rag { background: #4a9eff; }
+.context-bar-user { background: #e08a55; }
+.context-bar-assistant { background: #93b34c; }
+.context-bar-tool { background: #8b7cf8; }
+
+.context-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.context-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.context-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.context-dot-system { background: #9aa0a6; }
+.context-dot-memory { background: #3fa9a0; }
+.context-dot-rag { background: #4a9eff; }
+.context-dot-user { background: #e08a55; }
+.context-dot-assistant { background: #93b34c; }
+.context-dot-tool { background: #8b7cf8; }
+
+.context-row-label {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.context-row-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.context-row-tokens {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+  text-align: right;
+}
+
+.context-note {
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.context-memory-item {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.context-memory-item + .context-memory-item {
+  margin-top: 6px;
+}
+
+.context-memory-role {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.context-memory-role.is-user {
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  color: var(--brand);
+}
+
+.context-memory-content {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
 /* ---------- 运行日志面板 ---------- */
 .logs-section {
   display: flex;
@@ -2727,11 +2941,96 @@ body.resizing {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
   margin: 4px 0 8px;
+}
+
+/* ---------- 工具卡片组（按轮折叠） ---------- */
+.tool-group {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.tool-group-open {
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+}
+
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.tool-group-head:hover {
+  background: var(--surface-muted);
+}
+
+.tool-group-badge {
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  border-radius: 999px;
+}
+
+.tool-group-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-group-state {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--success);
+}
+
+.tool-group-state.has-err {
+  color: var(--danger);
+}
+
+.tool-group-chevron {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tool-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
 }
 
 /* ---------- 运行统计面板 ---------- */

@@ -109,21 +109,36 @@ export function resetMemoryTracking(): void {
   lastStoredCount = 0;
 }
 
-/** 按查询检索相关历史 episode，返回拼接文本（无结果返回空串） */
-export function retrieveEpisodes(query: string, k = memoryRecallK()): string {
+/** 检索命中的单条情景记忆明细 */
+export interface MemoryHit {
+  role: string;
+  content: string;
+  ts: number;
+}
+
+/** 按查询检索相关历史 episode，返回命中明细（无结果返回空数组） */
+export function retrieveEpisodeDetails(
+  query: string,
+  k = memoryRecallK(),
+): MemoryHit[] {
   const tokens = queryTokens(query);
-  if (tokens.length === 0) return "";
+  if (tokens.length === 0) return [];
   // OR 匹配 + BM25 排序：让包含更多关键词的 episode 排前
   const match = tokens.map((t) => `"${t}"`).join(" OR ");
-  const rows = getDb()
+  return getDb()
     .prepare(
-      `SELECT e.role, e.content
+      `SELECT e.role, e.content, e.ts
        FROM episodes_fts JOIN episodes e ON e.id = episodes_fts.rowid
        WHERE episodes_fts MATCH ?
        ORDER BY bm25(episodes_fts)
        LIMIT ?`,
     )
-    .all(match, k) as { role: string; content: string }[];
+    .all(match, k) as unknown as MemoryHit[];
+}
+
+/** 按查询检索相关历史 episode，返回拼接文本（无结果返回空串） */
+export function retrieveEpisodes(query: string, k = memoryRecallK()): string {
+  const rows = retrieveEpisodeDetails(query, k);
   if (rows.length === 0) return "";
   return rows
     .map((r) => `[${r.role}] ${r.content.slice(0, MAX_CHARS_PER_EPISODE)}`)

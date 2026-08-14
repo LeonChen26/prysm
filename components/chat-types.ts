@@ -37,6 +37,8 @@ export interface ToolCard {
   elapsedMs?: number;
   /** 该工具调用经过的审批结果（敏感工具） */
   approval?: ToolApproval;
+  /** 问答轮序号（从 1 开始，对应一条用户消息；用于按轮折叠卡片组） */
+  turnNo?: number;
 }
 
 const TOOLCARDS_KEY_PREFIX = "prysm.toolcards.";
@@ -194,6 +196,53 @@ export function formatApprovalArgs(toolName: string, args: unknown): string {
   }
 }
 
+/** turn 级 token 用量（来自 pi-ai 的 Usage，透传到前端，用于上下文 Tab 与成本统计） */
+export interface UsageInfo {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheWrite1h?: number;
+  reasoning?: number;
+  totalTokens: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+}
+
+/** 累加两次 turn 级用量（用于把多次 LLM 调用的 token/成本汇总成一轮问答的总量） */
+export function addUsage(
+  a: UsageInfo | null | undefined,
+  b: UsageInfo | null | undefined,
+): UsageInfo | null {
+  if (!b) return a ?? null;
+  if (!a) return b;
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    ...(a.cacheWrite1h != null || b.cacheWrite1h != null
+      ? { cacheWrite1h: (a.cacheWrite1h ?? 0) + (b.cacheWrite1h ?? 0) }
+      : {}),
+    ...(a.reasoning != null || b.reasoning != null
+      ? { reasoning: (a.reasoning ?? 0) + (b.reasoning ?? 0) }
+      : {}),
+    totalTokens: a.totalTokens + b.totalTokens,
+    cost: {
+      input: a.cost.input + b.cost.input,
+      output: a.cost.output + b.cost.output,
+      cacheRead: a.cost.cacheRead + b.cost.cacheRead,
+      cacheWrite: a.cost.cacheWrite + b.cost.cacheWrite,
+      total: a.cost.total + b.cost.total,
+    },
+  };
+}
+
 export interface SessionInfo {
   id: string;
   title: string;
@@ -202,6 +251,26 @@ export interface SessionInfo {
   pinned?: number;
   /** 会话形态（work/coding），Phase 1b 起由后端返回 */
   surface?: "work" | "coding";
+}
+
+/** 上下文构成的单个分类（GET /api/context 返回） */
+export interface ContextCategory {
+  key: string;
+  label: string;
+  chars: number;
+  /** 估算 token（字符估算，非真实） */
+  estimatedTokens: number;
+  count: number;
+}
+
+/** 会话上下文构成分析结果（真实 usage + 估算构成） */
+export interface ContextAnalysis {
+  categories: ContextCategory[];
+  totalEstimatedTokens: number;
+  usageTotals: UsageInfo | null;
+  lastUsage: UsageInfo | null;
+  memoryHits: { role: string; content: string; ts: number }[];
+  memoryTotal: number;
 }
 
 export interface SseEvent {
@@ -245,6 +314,8 @@ export interface SseEvent {
   surface?: string;
   summary?: string;
   steps?: { id: string; title: string; detail?: string; tool?: string; expected?: string }[];
+  /** turn 级 token 用量（turn_end 事件透传） */
+  usage?: UsageInfo;
 }
 
 export interface RunStats {

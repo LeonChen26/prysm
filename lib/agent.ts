@@ -1,5 +1,5 @@
 import { Agent, type AgentEvent, type AgentMessage } from "@earendil-works/pi-agent-core";
-import { contentText } from "@earendil-works/pi-ai";
+import { contentText, type Usage } from "@earendil-works/pi-ai";
 import { notifyApprovalNotice, requestApproval } from "./approval";
 import { logApproval } from "./audit";
 import { messageText } from "./messages";
@@ -17,6 +17,7 @@ import { buildSkillPrompt } from "./skills";
 import { resolveModel, resetModelRouter } from "./model-router";
 import { TOOL_META } from "./tool-meta";
 import { envValue } from "./config";
+import { clearRuns, getRuns, recordRun } from "./insights";
 import { getAllowedRoots, resolveInWorkdir } from "./paths";
 import { grantWorkspaceAccess } from "./workspace";
 
@@ -164,7 +165,7 @@ export async function generateTitle(
   return contentText(reply.content).trim().replace(/["""'']/g, "").slice(0, 20);
 }
 
-/** 运行日志条目（内存，上限 50 条） */
+/** 运行日志条目（持久化到 insights.db 的 turns 表） */
 export interface RunLogEntry {
   id: number;
   sessionId: string;
@@ -176,24 +177,31 @@ export interface RunLogEntry {
   error?: string;
   /** 本轮各工具调用次数（供运行统计） */
   toolCalls?: Record<string, number>;
+  /** 本轮 token 用量（真实值，turn_end 事件累加） */
+  usage?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    totalTokens: number;
+    cost: number;
+  };
 }
 
-const runLogs: RunLogEntry[] = [];
-
-/** 记录一次 Agent 运行 */
-export function logRun(entry: Omit<RunLogEntry, "id">): void {
-  runLogs.unshift({ id: Date.now(), ...entry });
-  if (runLogs.length > 50) runLogs.pop();
+/** 记录一次 Agent 运行（持久化到 insights.db，替代内存数组） */
+export function logRun(
+  entry: Omit<RunLogEntry, "id"> & { userText?: string; model?: string },
+): void {
+  recordRun(entry);
 }
 
-/** 最近运行日志（新在前） */
+/** 最近运行日志（新在前，从 insights.db 读） */
 export function getRunLogs(): RunLogEntry[] {
-  return runLogs.slice();
+  return getRuns();
 }
 
 /** 清空运行日志 */
 export function clearRunLogs(): void {
-  runLogs.length = 0;
+  clearRuns();
 }
 
 /**
@@ -438,7 +446,7 @@ export type UiEvent =
       todos?: { id: string; title: string; status: string; detail?: string }[];
       sessionId?: string;
     }
-  | { type: "turn_end"; sessionId?: string }
+  | { type: "turn_end"; usage?: Usage; sessionId?: string }
   | { type: "agent_end"; sessionId?: string };
 
 export function mapEvent(event: AgentEvent): UiEvent | null {
@@ -482,8 +490,10 @@ export function mapEvent(event: AgentEvent): UiEvent | null {
     }
     case "turn_start":
       return { type: "turn_start" };
-    case "turn_end":
-      return { type: "turn_end" };
+    case "turn_end": {
+      const msg = event.message as { usage?: Usage };
+      return { type: "turn_end", usage: msg?.usage };
+    }
     case "agent_end":
       return { type: "agent_end" };
     default:
