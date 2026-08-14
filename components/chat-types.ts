@@ -388,6 +388,10 @@ export interface InsightsSummary {
   runError: number;
   runStopped: number;
   noTools: number;
+  /** LLM-Judge 评分条数 */
+  judgeCount: number;
+  /** LLM-Judge 平均分（0-10，一位小数；无评分时为 null） */
+  avgJudgeScore: number | null;
 }
 
 /** GET /api/insights 返回的观测 + 评估聚合 */

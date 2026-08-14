@@ -222,6 +222,10 @@ export interface InsightsSummary {
   runError: number;
   runStopped: number;
   noTools: number;
+  /** LLM-Judge 评分条数 */
+  judgeCount: number;
+  /** LLM-Judge 平均分（0-10，一位小数；无评分时为 null） */
+  avgJudgeScore: number | null;
 }
 
 /** 观测 + 评估聚合：运行记录（附带各自评分）+ 汇总统计 */
@@ -251,6 +255,13 @@ export function getInsightsOverview(runLimit = 100): {
   const noTools = count(
     "SELECT COUNT(*) AS c FROM scores WHERE kind = 'rule' AND label = 'no_tools'",
   );
+  const judgeScores = (
+    d
+      .prepare(
+        "SELECT score FROM scores WHERE kind = 'rule' AND label = 'llm_judge' AND score IS NOT NULL",
+      )
+      .all() as Record<string, unknown>[]
+  ).map((r) => Number(r.score));
 
   const scores = listScores();
   const byRun = new Map<number, Score[]>();
@@ -276,6 +287,13 @@ export function getInsightsOverview(runLimit = 100): {
       runError,
       runStopped,
       noTools,
+      judgeCount: judgeScores.length,
+      avgJudgeScore:
+        judgeScores.length === 0
+          ? null
+          : Math.round(
+              (judgeScores.reduce((s, v) => s + v, 0) / judgeScores.length) * 10,
+            ) / 10,
     },
   };
 }

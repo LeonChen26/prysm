@@ -3775,6 +3775,16 @@ export function ChatPanel() {
                         <span className="insights-sum-num insights-warn">{insights.summary.ruleIssues}</span>
                         <span className="insights-sum-label">规则问题</span>
                       </div>
+                      <div className="insights-sum-cell">
+                        <span className="insights-sum-num insights-ai">
+                          {insights.summary.avgJudgeScore != null
+                            ? `${insights.summary.avgJudgeScore}`
+                            : "—"}
+                        </span>
+                        <span className="insights-sum-label">
+                          AI 均分{insights.summary.judgeCount > 0 ? `·${insights.summary.judgeCount}次` : ""}
+                        </span>
+                      </div>
                     </div>
 
                     {insights.runs.length === 0 ? (
@@ -3782,9 +3792,6 @@ export function ChatPanel() {
                     ) : (
                       <div className="insights-list">
                         {insights.runs.map((run) => {
-                          const hasGood = run.scores.some(
-                            (s) => s.kind === "human" && s.label === "good",
-                          );
                           const hasBad = run.scores.some(
                             (s) => s.kind === "human" && s.label === "bad",
                           );
@@ -3821,26 +3828,29 @@ export function ChatPanel() {
                                   </span>
                                 )}
                               </div>
-                              {(hasGood || hasBad || rules.length > 0) && (
+                              {run.scores.length > 0 && (
                                 <div className="insight-item-scores">
-                                  {hasGood && (
-                                    <span className="insight-score insight-score-good">👍</span>
-                                  )}
-                                  {hasBad && (
-                                    <span className="insight-score insight-score-bad">👎</span>
-                                  )}
-                                  {rules.map((r) => (
+                                  {run.scores.map((s) => (
                                     <span
-                                      key={r.id}
+                                      key={s.id}
                                       className={`insight-score ${
-                                        r.label === "llm_judge"
-                                          ? "insight-score-ai"
-                                          : "insight-score-rule"
+                                        s.kind === "human"
+                                          ? s.label === "good"
+                                            ? "insight-score-good"
+                                            : "insight-score-bad"
+                                          : s.label === "llm_judge"
+                                            ? "insight-score-ai"
+                                            : "insight-score-rule"
                                       }`}
+                                      title={s.comment}
                                     >
-                                      {r.label === "llm_judge"
-                                        ? `AI 评分 ${r.score != null ? r.score + "/10" : "?"}`
-                                        : (RULE_SCORE_LABELS[r.label] ?? r.label)}
+                                      {s.kind === "human"
+                                        ? s.label === "good"
+                                          ? "👍"
+                                          : "👎"
+                                        : s.label === "llm_judge"
+                                          ? `AI 评分 ${s.score != null ? s.score + "/10" : "?"}`
+                                          : (RULE_SCORE_LABELS[s.label] ?? s.label)}
                                     </span>
                                   ))}
                                 </div>

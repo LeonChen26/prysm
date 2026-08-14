@@ -2795,6 +2795,10 @@ body.resizing {
   color: var(--warning);
 }
 
+.insights-sum-num.insights-ai {
+  color: var(--brand);
+}
+
 .insights-sum-label {
   font-size: 10px;
   color: var(--text-muted);

@@ -13,6 +13,7 @@ import {
   addScore,
   getRuns,
   clearRuns,
+  getInsightsOverview,
   type Score,
 } from "../../lib/insights";
 import type { RunLogEntry } from "../../lib/agent";
@@ -332,6 +333,98 @@ const sA = addScore({ sessionId: "A", kind: "human", label: "评 A" });
 expectEq("会话 A 评分只关联 A 的 run", sA.runId, aOld);
 const sB = addScore({ sessionId: "B", kind: "human", label: "评 B" });
 expectEq("会话 B 评分关联 B 的 run", sB.runId, bNew);
+
+// ---------- 7. getInsightsOverview：LLM-Judge 评分统计 ----------
+console.log("\n== getInsightsOverview：无 LLM-Judge 评分 ==");
+freshDb();
+{
+  recordRun({
+    sessionId: "sess-judge-none",
+    title: "普通任务",
+    startedAt: 1,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+  });
+  const overview = getInsightsOverview();
+  expectEq("totalRuns 统计正确", overview.summary.totalRuns, 1);
+  expectEq("无 LLM-Judge 时 judgeCount 为 0", overview.summary.judgeCount, 0);
+  expectEq(
+    "无 LLM-Judge 时 avgJudgeScore 为 null",
+    overview.summary.avgJudgeScore,
+    null,
+  );
+}
+
+console.log("\n== getInsightsOverview：有 LLM-Judge 评分，计算均分 ==");
+freshDb();
+{
+  recordRun({
+    sessionId: "sess-judge-1",
+    title: "评分任务 1",
+    startedAt: 1,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+  });
+  const j1 = getRuns(1)[0].id;
+  addScore({
+    sessionId: "sess-judge-1",
+    runId: j1,
+    kind: "rule",
+    label: "llm_judge",
+    score: 8,
+    comment: "表现良好",
+  });
+  addScore({
+    sessionId: "sess-judge-1",
+    runId: j1,
+    kind: "rule",
+    label: "llm_judge",
+    score: 9,
+    comment: "稳定",
+  });
+  const overview = getInsightsOverview();
+  expectEq("judgeCount 等于评分条数", overview.summary.judgeCount, 2);
+  expectEq("avgJudgeScore 为 (8+9)/2=8.5", overview.summary.avgJudgeScore, 8.5);
+  expectTrue(
+    "run 附带 scores（含 llm_judge 评语）",
+    overview.runs[0]?.scores.some(
+      (s) => s.label === "llm_judge" && s.comment === "表现良好",
+    ) ?? false,
+  );
+}
+
+console.log("\n== getInsightsOverview：无 score 的 LLM-Judge 条目不计入均分 ==");
+freshDb();
+{
+  recordRun({
+    sessionId: "sess-judge-2",
+    title: "评分任务 2",
+    startedAt: 1,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+  });
+  addScore({ sessionId: "sess-judge-2", kind: "rule", label: "llm_judge" }); // 无 score
+  addScore({
+    sessionId: "sess-judge-2",
+    kind: "rule",
+    label: "llm_judge",
+    score: 10,
+  });
+  const overview = getInsightsOverview();
+  expectEq(
+    "无 score 的条目不计入 judgeCount",
+    overview.summary.judgeCount,
+    1,
+  );
+  expectEq(
+    "avgJudgeScore 只基于有分数的条目",
+    overview.summary.avgJudgeScore,
+    10,
+  );
+}
 
 // ---------- 清理 ----------
 clearRuns();
