@@ -16,6 +16,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import { mdToPlainText } from "@/lib/plaintext";
 import { TOOL_META } from "@/lib/tool-meta";
+import { DiffView, isDiffText } from "./DiffView";
 import {
   CodeBlock,
   extractFileRefs,
@@ -32,8 +33,11 @@ import {
   formatMsgTime,
   formatRelTime,
   GROUP_ORDER,
+  clearToolCards,
+  loadToolCards,
   readSSE,
   RISK_LABELS,
+  saveToolCards,
   TODO_STATUS_LABELS,
   toolCardStateClass,
   toolCardStateText,
@@ -63,6 +67,15 @@ const markdownComponents = {
     <a target="_blank" rel="noopener noreferrer" {...props} />
   ),
 };
+
+/** 工具结果视图：diff 文本高亮渲染，其余保持等宽纯文本 */
+function CardResultView({ result }: { result: string }) {
+  return isDiffText(result) ? (
+    <DiffView text={result} />
+  ) : (
+    <pre className="card-result">{result}</pre>
+  );
+}
 
 /** 空状态快捷任务入口（Coding 形态） */
 const QUICK_TASKS = [
@@ -471,6 +484,8 @@ export function ChatPanel() {
         const first = list.find((s) => (s.surface ?? "coding") === surface);
         if (first) {
           setSessionId(first.id);
+          // 初始加载同样恢复该会话已完成的工具卡片（持久化回顾）
+          setCards(loadToolCards(first.id));
           const res = await fetch(`/api/sessions/${first.id}`);
           const detail = await res.json();
           if (detail?.messages) setMessages(detail.messages);
@@ -485,7 +500,8 @@ export function ChatPanel() {
     async (id: string) => {
       if (busy) return;
       setSessionId(id);
-      setCards([]);
+      // 恢复该会话已完成的工具卡片（localStorage 持久化，供切会话/刷新后回顾）
+      setCards(loadToolCards(id));
       setTodos([]);
       setApprovals([]);
       setPlans([]);
@@ -551,6 +567,7 @@ export function ChatPanel() {
     async (id: string) => {
       try {
         await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+        clearToolCards(id);
         const rest = sessions.filter((s) => s.id !== id);
         setSessions(rest);
         if (id === sessionId) {
@@ -1021,7 +1038,10 @@ export function ChatPanel() {
       const t = text.trim();
       if (!t || busyRef.current) return;
       setError(null);
-      setCards([]);
+      // 恢复该会话已完成的工具卡片回顾；本轮的实时卡片随后由 tool_start/tool_end 追加
+      // 注意：新会话时 sessionId 由服务端 session 事件确认，此处先以 override/sessionId 兜底
+      let activeSessionId = overrideSessionId ?? sessionId;
+      setCards(loadToolCards(activeSessionId));
       setTodos([]);
       setApprovals([]);
       setPlans([]);
@@ -1058,6 +1078,7 @@ export function ChatPanel() {
               // 服务端确认/分配的会话（未指定时取最新或新建）
               if (ev.sessionId) {
                 const sid = ev.sessionId;
+                activeSessionId = sid;
                 setSessionId(sid);
                 setSessions((list) => {
                   const exists = list.some((s) => s.id === sid);
@@ -1092,21 +1113,26 @@ export function ChatPanel() {
               const id = ev.id;
               const toolName = ev.toolName;
               if (!id || !toolName) break;
-              setCards((c) => [
-                ...c,
-                {
-                  id,
-                  toolName,
-                  args: ev.args,
-                  status: "running",
-                  startedAt: Date.now(),
-                },
-              ]);
+              // 同一 toolCallId 去重：模型流式输出偶发重复 id 时避免重复卡片（React key 冲突）
+              setCards((c) =>
+                c.some((card) => card.id === id)
+                  ? c
+                  : [
+                      ...c,
+                      {
+                        id,
+                        toolName,
+                        args: ev.args,
+                        status: "running",
+                        startedAt: Date.now(),
+                      },
+                    ],
+              );
               break;
             }
             case "tool_end":
-              setCards((c) =>
-                c.map((card) => {
+              setCards((c) => {
+                const next: ToolCard[] = c.map((card) => {
                   if (card.id !== ev.id) return card;
                   return {
                     ...card,
@@ -1115,8 +1141,11 @@ export function ChatPanel() {
                     elapsedMs:
                       Date.now() - (card.startedAt ?? Date.now()),
                   };
-                }),
-              );
+                });
+                // 持久化已完成卡片：切会话/刷新/新任务后仍可回顾
+                saveToolCards(activeSessionId, next);
+                return next;
+              });
               if (ev.todos) setTodos(ev.todos);
               break;
             case "approval_required": {
@@ -2408,6 +2437,15 @@ export function ChatPanel() {
               }
               const inlineVisible = cards.length > 0 && lastUserIndex >= 0;
               return messages.map((m, i) => {
+                // 跳过"纯工具调用"的空 assistant 消息：content 仅含 toolCall、无正文，
+                // 在历史中不渲染空气泡（其动作已由工具卡片呈现）；仅保留正在流式的最新占位。
+                if (
+                  m.role === "assistant" &&
+                  !m.text &&
+                  !(busy && i === messages.length - 1)
+                ) {
+                  return <Fragment key={i} />;
+                }
                 const prev = messages[i - 1];
                 const next = messages[i + 1];
                 // iMessage 气泡分组：连续同角色消息合并，仅组尾显示尾巴与头像
@@ -2506,7 +2544,7 @@ export function ChatPanel() {
                         <span className="thinking-dot" />
                       </span>
                     ) : (
-                      <span className="cursor-blink" />
+                      <></>
                     )}
                     {groupEnd && m.text && (
                       <div className="msg-meta">
@@ -2598,7 +2636,7 @@ export function ChatPanel() {
                                 {expandedCards.has(card.id) ? "收起结果" : "查看结果"}
                               </button>
                               {expandedCards.has(card.id) && (
-                                <pre className="card-result">{card.result}</pre>
+                                <CardResultView result={card.result} />
                               )}
                             </>
                           )}
@@ -3061,7 +3099,7 @@ export function ChatPanel() {
                               {expandedCards.has(card.id) ? "收起结果" : "查看结果"}
                             </button>
                             {expandedCards.has(card.id) && (
-                              <pre className="card-result">{card.result}</pre>
+                              <CardResultView result={card.result} />
                             )}
                           </>
                         )}

@@ -39,6 +39,43 @@ export interface ToolCard {
   approval?: ToolApproval;
 }
 
+const TOOLCARDS_KEY_PREFIX = "prysm.toolcards.";
+const TOOLCARDS_MAX_PER_SESSION = 50;
+
+/** 按会话读取已完成的工具卡片（localStorage 持久化，供切会话/刷新后回顾） */
+export function loadToolCards(sessionId: string | null): ToolCard[] {
+  if (!sessionId) return [];
+  try {
+    const raw = localStorage.getItem(TOOLCARDS_KEY_PREFIX + sessionId);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as ToolCard[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 保存会话的工具卡片（仅存非 running 的已完成卡片，限制条数防止撑爆 localStorage） */
+export function saveToolCards(sessionId: string | null, cards: ToolCard[]): void {
+  if (!sessionId) return;
+  try {
+    const settled = cards.filter((c) => c.status !== "running");
+    const kept = settled.slice(-TOOLCARDS_MAX_PER_SESSION);
+    localStorage.setItem(TOOLCARDS_KEY_PREFIX + sessionId, JSON.stringify(kept));
+  } catch {
+    /* 存储满/不可用时静默降级为不持久化 */
+  }
+}
+
+/** 删除会话的工具卡片记录（删除会话时调用） */
+export function clearToolCards(sessionId: string): void {
+  try {
+    localStorage.removeItem(TOOLCARDS_KEY_PREFIX + sessionId);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 工具卡片状态文案：有审批结果优先展示审批结果，否则才是执行完成/失败 */
 export function toolCardStateText(card: ToolCard): string {
   if (card.status === "running") return "运行中";
