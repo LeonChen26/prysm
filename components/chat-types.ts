@@ -343,6 +343,59 @@ export const TODO_STATUS_LABELS: Record<TodoItem["status"], string> = {
   cancelled: "已取消",
 };
 
+/** 单次运行的真实 token 用量（与后端 RunLogEntry.usage 对齐，cost 为数值） */
+export interface InsightRunUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  totalTokens: number;
+  cost: number;
+}
+
+/** 评分条目（人工 👍/👎 或规则评估） */
+export interface ScoreInfo {
+  id: number;
+  runId: number | null;
+  sessionId: string;
+  kind: "human" | "rule";
+  label: string;
+  score?: number;
+  comment?: string;
+  createdAt: number;
+}
+
+/** 一次运行（问答）的观测记录 + 其评分 */
+export interface InsightRun {
+  id: number;
+  sessionId: string;
+  title: string;
+  startedAt: number;
+  durationMs: number;
+  messageCount: number;
+  stopped: boolean;
+  error?: string;
+  toolCalls?: Record<string, number>;
+  usage?: InsightRunUsage;
+  scores: ScoreInfo[];
+}
+
+/** 评估汇总 */
+export interface InsightsSummary {
+  totalRuns: number;
+  good: number;
+  bad: number;
+  ruleIssues: number;
+  runError: number;
+  runStopped: number;
+  noTools: number;
+}
+
+/** GET /api/insights 返回的观测 + 评估聚合 */
+export interface InsightsOverview {
+  runs: InsightRun[];
+  summary: InsightsSummary;
+}
+
 export const GROUP_ORDER = ["今天", "昨天", "7天内", "更早"];
 
 /** 会话分组：今天 / 昨天 / 7天内 / 更早 */

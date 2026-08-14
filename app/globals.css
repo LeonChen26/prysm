@@ -1299,13 +1299,13 @@ body.resizing {
 }
 
 .message-user .msg-action {
-  background: rgba(255, 255, 255, 0.22);
-  color: #fff;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-secondary);
 }
 
 .message-user .msg-action:hover {
-  background: rgba(255, 255, 255, 0.34);
-  color: #fff;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  color: var(--text);
 }
 
 .message-user .msg-meta {
@@ -1313,7 +1313,7 @@ body.resizing {
 }
 
 .message-user .msg-time {
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--text-muted);
 }
 
 .msg-action-del:hover {
@@ -2753,6 +2753,165 @@ body.resizing {
   padding: 8px 2px 0;
 }
 
+/* ---------- 评估面板（观测 + 评估聚合） ---------- */
+.insights-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.insights-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.insights-sum-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 2px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.insights-sum-num {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.insights-sum-num.insights-good {
+  color: var(--success);
+}
+
+.insights-sum-num.insights-bad {
+  color: var(--danger);
+}
+
+.insights-sum-num.insights-warn {
+  color: var(--warning);
+}
+
+.insights-sum-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.insights-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.insight-item {
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.insight-item:hover {
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+}
+
+.insight-item-issue {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
+  background: color-mix(in srgb, var(--warning) 4%, var(--surface));
+}
+
+.insight-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.insight-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insight-state {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+
+.insight-state.ok {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.insight-state.stopped {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+
+.insight-state.err {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.insight-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.insight-item-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.insight-score {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+
+.insight-score-good {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.insight-score-bad {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.insight-score-rule {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+
+.insight-error {
+  margin-top: 5px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--danger);
+  word-break: break-all;
+}
+
 /* ---------- 审批历史面板 ---------- */
 .audit-section {
   display: flex;
@@ -2941,7 +3100,12 @@ body.resizing {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 4px 0 8px;
+  /* 与 .message 相同的居中/限宽，并跳过头像区（30px 头像 + 12px 间距），
+     使折叠条左缘对齐助手气泡文字、右缘对齐助手气泡右缘 */
+  width: 100%;
+  max-width: 780px;
+  margin: 4px auto 8px;
+  padding: 0 24px 0 66px;
 }
 
 /* ---------- 工具卡片组（按轮折叠） ---------- */

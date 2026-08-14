@@ -56,6 +56,7 @@ import {
   type UiMessage,
   type UsageInfo,
   type ContextAnalysis,
+  type InsightsOverview,
 } from "./chat-types";
 
 /** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
@@ -215,6 +216,13 @@ const QUICK_TASKS = [
   "写一份 Next.js 服务端组件的介绍",
 ];
 
+/** 规则评估 label → 中文（评估面板展示） */
+const RULE_SCORE_LABELS: Record<string, string> = {
+  run_error: "运行错误",
+  run_stopped: "手动停止",
+  no_tools: "未用工具",
+};
+
 /** Work 形态空会话模板（办公任务）：点击即创建对应任务的会话并立即发起 */
 const WORK_TEMPLATES: {
   id: string;
@@ -359,14 +367,16 @@ export function ChatPanel() {
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   /** 左栏视图：会话列表 / 文件浏览器 / 设置 */
   const [activityView, setActivityView] = useState<"sessions" | "files" | "settings">("sessions");
-  /** 右栏 Tab：工具卡片 / 记忆 / 日志 / 审计 / 上下文 */
+  /** 右栏 Tab：工具卡片 / 记忆 / 日志 / 审计 / 上下文 / 评估 */
   const [rightTab, setRightTab] = useState<
-    "cards" | "memory" | "logs" | "audit" | "context"
+    "cards" | "memory" | "logs" | "audit" | "context" | "insights"
   >("cards");
   /** 本轮问答的累计 turn 级 token 用量（turn_end 事件累加） */
   const [runUsage, setRunUsage] = useState<UsageInfo | null>(null);
   /** 上下文构成分析（GET /api/context 结果） */
   const [contextAnalysis, setContextAnalysis] = useState<ContextAnalysis | null>(null);
+  /** 观测+评估聚合（GET /api/insights 结果） */
+  const [insights, setInsights] = useState<InsightsOverview | null>(null);
   /** 工作区文件浏览器 */
   const [wbDirs, setWbDirs] = useState<
     Record<string, { name: string; isDir: boolean; size: number; mtime: number }[]>
@@ -829,6 +839,17 @@ export function ChatPanel() {
       /* 静默 */
     }
   }, [sessionId]);
+
+  /** 拉取观测+评估聚合（运行记录 + 评分汇总） */
+  const refreshInsights = useCallback(async () => {
+    try {
+      const r = await fetch("/api/insights");
+      const data = await r.json();
+      if (Array.isArray(data?.runs) && data?.summary) setInsights(data);
+    } catch {
+      /* 静默 */
+    }
+  }, []);
 
   /** 删除单条情景记忆 */
   const removeMemory = useCallback(
@@ -3192,6 +3213,12 @@ export function ChatPanel() {
             >
               上下文
             </button>
+            <button
+              className={`panel-tab ${rightTab === "insights" ? "panel-tab-active" : ""}`}
+              onClick={() => { setRightTab("insights"); refreshInsights(); }}
+            >
+              评估
+            </button>
           </div>
           <div className="panel-scroll">
             {/* Tab: 工具卡片 */}
@@ -3722,6 +3749,118 @@ export function ChatPanel() {
                 ) : (
                   <p className="panel-empty">加载上下文分析中…</p>
                 )}
+              </div>
+            )}
+
+            {/* Tab: 评估（观测+评估聚合，Langfuse 式闭环） */}
+            {rightTab === "insights" && (
+              <div className="insights-section">
+                {insights ? (
+                  <>
+                    <div className="insights-summary">
+                      <div className="insights-sum-cell">
+                        <span className="insights-sum-num">{insights.summary.totalRuns}</span>
+                        <span className="insights-sum-label">总运行</span>
+                      </div>
+                      <div className="insights-sum-cell">
+                        <span className="insights-sum-num insights-good">{insights.summary.good}</span>
+                        <span className="insights-sum-label">👍 好评</span>
+                      </div>
+                      <div className="insights-sum-cell">
+                        <span className="insights-sum-num insights-bad">{insights.summary.bad}</span>
+                        <span className="insights-sum-label">👎 差评</span>
+                      </div>
+                      <div className="insights-sum-cell">
+                        <span className="insights-sum-num insights-warn">{insights.summary.ruleIssues}</span>
+                        <span className="insights-sum-label">规则问题</span>
+                      </div>
+                    </div>
+
+                    {insights.runs.length === 0 ? (
+                      <p className="panel-empty">暂无运行记录</p>
+                    ) : (
+                      <div className="insights-list">
+                        {insights.runs.map((run) => {
+                          const hasGood = run.scores.some(
+                            (s) => s.kind === "human" && s.label === "good",
+                          );
+                          const hasBad = run.scores.some(
+                            (s) => s.kind === "human" && s.label === "bad",
+                          );
+                          const rules = run.scores.filter((s) => s.kind === "rule");
+                          const issue = !!run.error || run.stopped || hasBad || rules.length > 0;
+                          return (
+                            <div
+                              key={run.id}
+                              className={`insight-item ${issue ? "insight-item-issue" : ""}`}
+                              onClick={() => switchSession(run.sessionId)}
+                              title={issue ? "点击打开该会话复盘" : "点击打开该会话"}
+                            >
+                              <div className="insight-item-head">
+                                <span className="insight-title">
+                                  {run.title || "未命名会话"}
+                                </span>
+                                <span
+                                  className={`insight-state ${
+                                    run.error ? "err" : run.stopped ? "stopped" : "ok"
+                                  }`}
+                                >
+                                  {run.error ? "错误" : run.stopped ? "停止" : "完成"}
+                                </span>
+                              </div>
+                              <div className="insight-item-meta">
+                                <span>{formatMsgTime(run.startedAt)}</span>
+                                <span>{formatDuration(run.durationMs)}</span>
+                                {run.usage && (
+                                  <span>{run.usage.totalTokens} tok</span>
+                                )}
+                                {run.toolCalls && (
+                                  <span>
+                                    {Object.keys(run.toolCalls).length} 工具
+                                  </span>
+                                )}
+                              </div>
+                              {(hasGood || hasBad || rules.length > 0) && (
+                                <div className="insight-item-scores">
+                                  {hasGood && (
+                                    <span className="insight-score insight-score-good">👍</span>
+                                  )}
+                                  {hasBad && (
+                                    <span className="insight-score insight-score-bad">👎</span>
+                                  )}
+                                  {rules.map((r) => (
+                                    <span
+                                      key={r.id}
+                                      className="insight-score insight-score-rule"
+                                    >
+                                      {RULE_SCORE_LABELS[r.label] ?? r.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {run.error && (
+                                <p className="insight-error">
+                                  {run.error.slice(0, 120)}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="panel-empty">加载评估数据中…</p>
+                )}
+                <div className="panel-actions">
+                  <button
+                    type="button"
+                    className="panel-action"
+                    onClick={refreshInsights}
+                  >
+                    刷新评估
+                  </button>
+                </div>
               </div>
             )}
           </div>

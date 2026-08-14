@@ -191,3 +191,91 @@ export function clearRuns(): void {
   d.exec("DELETE FROM turns");
   d.exec("DELETE FROM scores");
 }
+
+function rowToScore(row: Record<string, unknown>): Score {
+  return {
+    id: Number(row.id),
+    runId: row.run_id == null ? null : Number(row.run_id),
+    sessionId: String(row.session_id),
+    kind: row.kind as "human" | "rule",
+    label: String(row.label),
+    score: row.score == null ? undefined : Number(row.score),
+    comment: row.comment ? String(row.comment) : undefined,
+    createdAt: Number(row.created_at),
+  };
+}
+
+/** 最近评分记录（新在前） */
+export function listScores(limit = 500): Score[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM scores ORDER BY id DESC LIMIT ?")
+    .all(limit) as Record<string, unknown>[];
+  return rows.map(rowToScore);
+}
+
+/** 评估汇总（基于 turns/scores 全库计数） */
+export interface InsightsSummary {
+  totalRuns: number;
+  good: number;
+  bad: number;
+  ruleIssues: number;
+  runError: number;
+  runStopped: number;
+  noTools: number;
+}
+
+/** 观测 + 评估聚合：运行记录（附带各自评分）+ 汇总统计 */
+export function getInsightsOverview(runLimit = 100): {
+  runs: (RunLogEntry & { scores: Score[] })[];
+  summary: InsightsSummary;
+} {
+  const d = getDb();
+  const count = (sql: string): number => {
+    const row = d.prepare(sql).get() as { c: number } | undefined;
+    return Number(row?.c ?? 0);
+  };
+
+  const totalRuns = count("SELECT COUNT(*) AS c FROM turns");
+  const good = count(
+    "SELECT COUNT(*) AS c FROM scores WHERE kind = 'human' AND label = 'good'",
+  );
+  const bad = count(
+    "SELECT COUNT(*) AS c FROM scores WHERE kind = 'human' AND label = 'bad'",
+  );
+  const runError = count(
+    "SELECT COUNT(*) AS c FROM scores WHERE kind = 'rule' AND label = 'run_error'",
+  );
+  const runStopped = count(
+    "SELECT COUNT(*) AS c FROM scores WHERE kind = 'rule' AND label = 'run_stopped'",
+  );
+  const noTools = count(
+    "SELECT COUNT(*) AS c FROM scores WHERE kind = 'rule' AND label = 'no_tools'",
+  );
+
+  const scores = listScores();
+  const byRun = new Map<number, Score[]>();
+  for (const s of scores) {
+    if (s.runId == null) continue;
+    const arr = byRun.get(s.runId) ?? [];
+    arr.push(s);
+    byRun.set(s.runId, arr);
+  }
+
+  const runs = getRuns(runLimit).map((r) => ({
+    ...r,
+    scores: byRun.get(r.id) ?? [],
+  }));
+
+  return {
+    runs,
+    summary: {
+      totalRuns,
+      good,
+      bad,
+      ruleIssues: runError + runStopped + noTools,
+      runError,
+      runStopped,
+      noTools,
+    },
+  };
+}
