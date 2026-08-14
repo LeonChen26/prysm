@@ -378,6 +378,10 @@ export function ChatPanel() {
   const [contextAnalysis, setContextAnalysis] = useState<ContextAnalysis | null>(null);
   /** 观测+评估聚合（GET /api/insights 结果） */
   const [insights, setInsights] = useState<InsightsOverview | null>(null);
+  /** 评估面板筛选：all=全部 / issue=仅问题 / low=仅低分（AI 评分 <7） */
+  const [insightsFilter, setInsightsFilter] = useState<"all" | "issue" | "low">(
+    "all",
+  );
   /** 工作区文件浏览器 */
   const [wbDirs, setWbDirs] = useState<
     Record<string, { name: string; isDir: boolean; size: number; mtime: number }[]>
@@ -3787,16 +3791,66 @@ export function ChatPanel() {
                       </div>
                     </div>
 
+                    <div className="insights-filter">
+                      {(
+                        [
+                          ["all", "全部"],
+                          ["issue", "仅问题"],
+                          ["low", "仅低分"],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          className={`insights-filter-chip ${
+                            insightsFilter === key ? "active" : ""
+                          }`}
+                          onClick={() => setInsightsFilter(key)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
                     {insights.runs.length === 0 ? (
                       <p className="panel-empty">暂无运行记录</p>
                     ) : (
                       <div className="insights-list">
-                        {insights.runs.map((run) => {
+                        {insights.runs
+                          .filter((run) => {
+                            if (insightsFilter === "all") return true;
+                            const hasBad = run.scores.some(
+                              (s) => s.kind === "human" && s.label === "bad",
+                            );
+                            const rules = run.scores.filter((s) => s.kind === "rule");
+                            const issue =
+                              !!run.error ||
+                              run.stopped ||
+                              hasBad ||
+                              rules.length > 0;
+                            if (insightsFilter === "issue") return issue;
+                            // low：AI 评分 < 7 的坏案例（无评分视为不命中）
+                            const aiScores = run.scores
+                              .filter(
+                                (s) => s.label === "llm_judge" && s.score != null,
+                              )
+                              .map((s) => s.score!);
+                            return (
+                              aiScores.length > 0 &&
+                              Math.min(...aiScores) < 7
+                            );
+                          })
+                          .map((run) => {
                           const hasBad = run.scores.some(
                             (s) => s.kind === "human" && s.label === "bad",
                           );
                           const rules = run.scores.filter((s) => s.kind === "rule");
                           const issue = !!run.error || run.stopped || hasBad || rules.length > 0;
+                          // 最低 LLM-Judge 评分及其评语（低分复盘用）
+                          const aiRated = run.scores
+                            .filter((s) => s.label === "llm_judge" && s.score != null)
+                            .sort((a, b) => (a.score! - b.score!));
+                          const aiLow = aiRated[0];
                           return (
                             <div
                               key={run.id}
@@ -3854,6 +3908,11 @@ export function ChatPanel() {
                                     </span>
                                   ))}
                                 </div>
+                              )}
+                              {aiLow && aiLow.score! < 7 && (
+                                <p className="insight-ai-comment">
+                                  {aiLow.comment || "低分案例，建议复盘"}
+                                </p>
                               )}
                               {run.error && (
                                 <p className="insight-error">

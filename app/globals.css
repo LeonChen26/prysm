@@ -2804,6 +2804,36 @@ body.resizing {
   color: var(--text-muted);
 }
 
+.insights-filter {
+  display: flex;
+  gap: 6px;
+  padding-top: 10px;
+}
+
+.insights-filter-chip {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.insights-filter-chip:hover {
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+  color: var(--text);
+}
+
+.insights-filter-chip.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  color: var(--brand);
+}
+
 .insights-list {
   display: flex;
   flex-direction: column;
@@ -2919,6 +2949,16 @@ body.resizing {
   line-height: 1.5;
   color: var(--danger);
   word-break: break-all;
+}
+
+.insight-ai-comment {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  word-break: break-word;
+  border-left: 2px solid color-mix(in srgb, var(--brand) 40%, transparent);
+  padding-left: 8px;
 }
 
 /* ---------- 审批历史面板 ---------- */
