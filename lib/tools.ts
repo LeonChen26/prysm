@@ -38,6 +38,7 @@ interface FileHit {
   path: string;
   line: number;
   text: string;
+  context?: string; // 前后文行，增强版新增
 }
 
 /** 文件名通配（支持 * 和 ?）转正则 */
@@ -53,14 +54,80 @@ function globToRegex(pattern: string): RegExp | null {
   }
 }
 
+/**
+ * 路径级 glob 转正则（按文件名查找）：
+ * - `**` 匹配跨任意层级目录
+ * - `*`  匹配单段（不含 /）
+ * - `?`  匹配单个字符（不含 /）
+ * pattern 不含 "/" 时视为匹配任意层级下的文件名（自动补全局前缀）。
+ */
+function globPathToRegex(pattern: string): RegExp | null {
+  let full = pattern;
+  if (!full.includes("/")) full = `**/${full}`;
+  const escaped = full
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "\u0000") // 占位，避免被 * 规则拆开
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, "[^/]")
+    .replace(/\u0000/g, ".*");
+  try {
+    return new RegExp(`^${escaped}$`, "i");
+  } catch {
+    return null;
+  }
+}
+
+/** 按文件名 glob 在工作区内递归查找文件（限制深度/数量，跳过常见无关目录） */
+async function findInWorkdir(
+  pattern: string,
+  subPath: string | undefined,
+  limit: number,
+): Promise<{ path: string; size: number }[]> {
+  const re = globPathToRegex(pattern);
+  if (!re) throw new Error(`无效的 glob 模式: ${pattern}`);
+  const root = resolveInWorkdirOrThrow(subPath ?? "");
+  const stat = await fs.stat(root);
+  if (!stat.isDirectory()) throw new Error(`不是目录: ${subPath ?? ""}`);
+  const hits: { path: string; size: number }[] = [];
+  const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build"]);
+  const walk = async (dir: string) => {
+    if (hits.length >= limit) return;
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (hits.length >= limit) return;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name)) continue;
+        await walk(full);
+      } else if (e.isFile()) {
+        const rel = path.relative(AGENT_WORKDIR, full).replace(/\\/g, "/");
+        if (re.test(rel)) {
+          const size = (await fs.stat(full)).size;
+          hits.push({ path: rel, size });
+        }
+      }
+    }
+  };
+  await walk(root);
+  return hits;
+}
+
 /** 在工作区内递归搜索关键词（限制单文件大小，跳过常见无关目录） */
 async function searchInWorkdir(
   query: string,
   pattern: string | undefined,
   limit: number,
+  ignoreCase = false,
+  context = 0,
 ): Promise<FileHit[]> {
   const hits: FileHit[] = [];
   const re = pattern ? globToRegex(pattern) : null;
+  const q = ignoreCase ? query.toLowerCase() : query;
   const MAX_FILE_BYTES = 1024 * 1024; // 跳过 1MB 以上大文件
   const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build"]);
 
@@ -86,11 +153,25 @@ async function searchInWorkdir(
           const text = await fs.readFile(full, "utf-8");
           const lines = text.split("\n");
           for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes(query)) {
+            const lineText = ignoreCase ? lines[i].toLowerCase() : lines[i];
+            if (lineText.includes(q)) {
+              let ctx: string | undefined;
+              if (context > 0) {
+                const start = Math.max(0, i - context);
+                const end = Math.min(lines.length, i + context + 1);
+                ctx = lines
+                  .slice(start, end)
+                  .map((l, k) => {
+                    const n = start + k + 1;
+                    return `${n === i + 1 ? ">" : " "}${n}: ${l.slice(0, 200)}`;
+                  })
+                  .join("\n");
+              }
               hits.push({
                 path: path.relative(AGENT_WORKDIR, full).replace(/\\/g, "/"),
                 line: i + 1,
                 text: lines[i].slice(0, 200),
+                context: ctx,
               });
               if (hits.length >= limit) return;
             }

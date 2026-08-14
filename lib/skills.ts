@@ -157,6 +157,55 @@ export function disableSkill(name: string): boolean {
   return true;
 }
 
+// ------------------------------------------------------------ 可视化增删
+
+const SKILL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+/**
+ * 新建 Skill（界面可视化创建）：在 skills 目录创建 <name>/SKILL.md
+ * （frontmatter 模板 + 正文），随后重扫登记（默认启用）。
+ * 名称非法 / 已存在时抛错。
+ */
+export function createSkill(
+  input: { name: string; description?: string; version?: string; tools?: string[]; body?: string },
+  dir?: string,
+): SkillDef {
+  const name = input.name.trim();
+  if (!SKILL_NAME_RE.test(name)) {
+    throw new Error("Skill 名称非法：仅允许字母/数字/下划线/连字符");
+  }
+  const root = dir ?? getConfig().skillsDir ?? basePath("skills");
+  const skillDir = path.join(root, name);
+  if (fs.existsSync(skillDir)) {
+    throw new Error(`Skill "${name}" 已存在`);
+  }
+  const tools = (input.tools ?? []).map((t) => t.trim()).filter(Boolean);
+  const fm: string[] = ["---", `name: ${name}`];
+  const description = input.description?.trim();
+  const version = input.version?.trim();
+  if (description) fm.push(`description: ${description}`);
+  if (version) fm.push(`version: ${version}`);
+  if (tools.length > 0) fm.push(`tools: [${tools.join(", ")}]`);
+  fm.push("---", "", input.body?.trim() ?? "");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(path.join(skillDir, "SKILL.md"), fm.join("\n") + "\n", "utf-8");
+  reloadSkills(dir);
+  const s = loaded.get(name);
+  if (!s) throw new Error(`Skill "${name}" 创建后登记失败`);
+  return s;
+}
+
+/** 删除 Skill（界面可视化删除）：删除 skills/<name> 目录并取消登记。不存在返回 false。 */
+export function deleteSkill(name: string, dir?: string): boolean {
+  const root = dir ?? getConfig().skillsDir ?? basePath("skills");
+  const skillDir = path.join(root, name);
+  if (!fs.existsSync(skillDir)) return false;
+  fs.rmSync(skillDir, { recursive: true, force: true });
+  enabled.delete(name);
+  reloadSkills(dir);
+  return true;
+}
+
 /** 已启用技能的名称列表 */
 export function enabledSkillNames(): string[] {
   return [...loaded.keys()].filter((n) => enabled.has(n));

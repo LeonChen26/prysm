@@ -12,6 +12,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { Type, type TSchema } from "typebox";
 import fs from "node:fs";
+import path from "node:path";
 import { basePath } from "../config";
 import type { ToolProvider } from "./registry";
 
@@ -73,6 +74,29 @@ export function loadMcpConfig(mcpConfigPath?: string): Record<string, McpServerO
     console.error(`[mcp] mcp.json 解析失败: ${(err as Error).message}`);
     return {};
   }
+}
+
+/**
+ * 原子写回 mcp.json（临时文件 + rename），保留 servers 外的其它顶层字段。
+ * 供「可视化增删服务器」持久化配置用。
+ */
+export function saveMcpConfig(
+  servers: Record<string, McpServerOptions>,
+  mcpConfigPath?: string,
+): void {
+  const p = mcpConfigPath ?? basePath("mcp.json");
+  let existing: McpConfigFile = {};
+  try {
+    existing = JSON.parse(fs.readFileSync(p, "utf-8")) as McpConfigFile;
+  } catch {
+    /* 文件缺失/非法 → 从空配置重建 */
+  }
+  const cfg: McpConfigFile = { ...existing, servers };
+  const dir = path.dirname(p);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${p}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
+  fs.renameSync(tmp, p);
 }
 
 // ------------------------------------------------------- JSON Schema → typebox
@@ -394,6 +418,45 @@ export class McpClientPool {
     );
     this.handles.clear();
     this.initialized = false;
+  }
+
+  /**
+   * 新增并连接一个 server（界面可视化增删）。
+   * 1) 校验名称唯一（句柄与配置文件双重检查）
+   * 2) 写回 mcp.json（持久化）
+   * 3) buildHandle 建立连接（失败时句柄保留为 error，便于界面查看/删除）
+   */
+  async addServer(name: string, options: McpServerOptions): Promise<McpServerStatus> {
+    await this.init();
+    if (this.handles.has(name)) {
+      throw new Error(`MCP server "${name}" 已存在`);
+    }
+    const servers = loadMcpConfig(this.configPath);
+    if (servers[name]) {
+      throw new Error(`MCP server "${name}" 已在 mcp.json 中配置`);
+    }
+    saveMcpConfig({ ...servers, [name]: options }, this.configPath);
+    await this.buildHandle(name, options);
+    return this.status().find((s) => s.name === name)!;
+  }
+
+  /** 删除一个 server：断开连接并从 mcp.json 移除。未配置返回 false。 */
+  async removeServer(name: string): Promise<boolean> {
+    await this.init();
+    const h = this.handles.get(name);
+    if (!h) return false;
+    this.handles.delete(name);
+    try {
+      await h.client?.close();
+    } catch {
+      /* 忽略关闭错误 */
+    }
+    const servers = loadMcpConfig(this.configPath);
+    if (servers[name]) {
+      delete servers[name];
+      saveMcpConfig(servers, this.configPath);
+    }
+    return true;
   }
 }
 

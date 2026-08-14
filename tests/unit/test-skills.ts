@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { configure, resetConfig } from "../../lib/config";
-import { resetSkills, loadSkills, parseSkillMd, initSkills, reloadSkills, listSkills, enableSkill, disableSkill, enabledSkillNames, enabledSkillTools, buildSkillPrompt, type SkillDef } from "../../lib/skills";
+import { resetSkills, loadSkills, parseSkillMd, initSkills, reloadSkills, listSkills, enableSkill, disableSkill, enabledSkillNames, enabledSkillTools, buildSkillPrompt, createSkill, deleteSkill, type SkillDef } from "../../lib/skills";
 import { skillToolProvider } from "../../lib/tools/skill";
 
 function fail(msg: string): never {
@@ -111,6 +111,41 @@ console.log("\n== reload 热加载：新增技能默认启用，移除技能被�
   expectEq("reload 后仅剩 b", after.map((s) => s.name), ["b"]);
   expectEq("b 默认启用", listSkills()[0].enabled, true);
   expectEq("b 工具名单", enabledSkillTools(), ["web_search"]);
+}
+
+console.log("\n== 可视化增删：createSkill / deleteSkill ==");
+{
+  resetSkills();
+  const dir = makeSkillsDir({});
+  const s = createSkill({ name: "new-skill", description: "测试技能" }, dir);
+  expectEq("创建后登记 name", s.name, "new-skill");
+  expectEq("创建后登记 description", s.description, "测试技能");
+  expectTrue("SKILL.md 文件已生成", fs.existsSync(path.join(dir, "new-skill", "SKILL.md")));
+  expectEq("新技能默认启用", listSkills().find((x) => x.name === "new-skill")?.enabled, true);
+
+  // 重名 → 抛错
+  let dupErr = "";
+  try {
+    createSkill({ name: "new-skill" }, dir);
+  } catch (e) {
+    dupErr = (e as Error).message;
+  }
+  expectTrue("重名创建被拒绝", dupErr.includes("已存在"));
+
+  // 非法名称（目录穿越）→ 抛错
+  let badErr = "";
+  try {
+    createSkill({ name: "../evil" }, dir);
+  } catch (e) {
+    badErr = (e as Error).message;
+  }
+  expectTrue("非法名称被拒绝", badErr.includes("名称非法"));
+
+  // 删除
+  expectTrue("deleteSkill 成功", deleteSkill("new-skill", dir));
+  expectEq("删除后不再登记", listSkills().some((x) => x.name === "new-skill"), false);
+  expectEq("目录已删除", fs.existsSync(path.join(dir, "new-skill")), false);
+  expectEq("删除不存在的返回 false", deleteSkill("ghost", dir), false);
 }
 
 console.log("\n== buildSkillPrompt 注入 ==");

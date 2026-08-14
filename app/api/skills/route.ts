@@ -1,4 +1,6 @@
 import {
+  createSkill,
+  deleteSkill,
   disableSkill,
   enableSkill,
   listSkills,
@@ -20,7 +22,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/skills —— 启用/禁用/重载（body: { name, action: "enable"|"disable"|"reload" }） */
+/** POST /api/skills —— 启用/禁用/重载/新建/删除（body: { name, action }） */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -32,6 +34,28 @@ export async function POST(req: Request) {
     const name = String(body?.name ?? "").trim();
     if (!name) {
       return Response.json({ error: "name 不能为空" }, { status: 400 });
+    }
+    if (action === "create") {
+      try {
+        const skill = createSkill({
+          name,
+          description: body?.description ? String(body.description) : undefined,
+          tools: Array.isArray(body?.tools) ? body.tools.map(String) : undefined,
+          body: body?.body ? String(body.body) : undefined,
+        });
+        return Response.json({ ok: true, skill });
+      } catch (err) {
+        return Response.json(
+          { error: err instanceof Error ? err.message : String(err) },
+          { status: 400 },
+        );
+      }
+    }
+    if (action === "delete") {
+      if (!deleteSkill(name)) {
+        return Response.json({ error: `技能 ${name} 不存在` }, { status: 404 });
+      }
+      return Response.json({ ok: true, name, deleted: true });
     }
     if (action === "enable") {
       if (!enableSkill(name)) {
@@ -46,7 +70,7 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, name, enabled: false });
     }
     return Response.json(
-      { error: "action 仅支持 enable / disable / reload" },
+      { error: "action 仅支持 enable / disable / reload / create / delete" },
       { status: 400 },
     );
   } catch (err) {
