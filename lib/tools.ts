@@ -187,6 +187,51 @@ async function searchInWorkdir(
   return hits;
 }
 
+/** 统计字符串中的换行数（用于定位 old_string / new_string 的行号） */
+function countNewlines(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 10) n++;
+  return n;
+}
+
+/**
+ * 生成行级 unified diff 文本（单 hunk：替换区间 + 前后 3 行上下文）。
+ * 供 edit_file 展示精准变更，便于模型/用户核对改动是否符合预期。
+ *
+ * @param relPath  相对路径（用于 --- / +++ 头）
+ * @param oldLines 原文件按行拆分
+ * @param newLines 替换后文件按行拆分
+ * @param oldStartLine old_string 首行（0 基）
+ * @param oldEndLine   old_string 尾行（0 基）
+ * @param newEndLine   new_string 尾行（0 基，相对 newLines）
+ */
+function buildEditDiff(
+  relPath: string,
+  oldLines: string[],
+  newLines: string[],
+  oldStartLine: number,
+  oldEndLine: number,
+  newEndLine: number,
+): string {
+  const CTX = 3;
+  const hs = Math.max(0, oldStartLine - CTX);
+  const he = Math.min(oldLines.length, oldEndLine + 1 + CTX);
+  const oldAffected = oldEndLine - oldStartLine + 1;
+  const newAffected = newEndLine - oldStartLine + 1;
+  const oldCount = he - hs;
+  const newCount = oldCount - oldAffected + newAffected;
+  const out: string[] = [
+    `--- a/${relPath}`,
+    `+++ b/${relPath}`,
+    `@@ -${hs + 1},${oldCount} +${hs + 1},${newCount} @@`,
+  ];
+  for (let i = hs; i < oldStartLine; i++) out.push(` ${oldLines[i]}`);
+  for (let i = oldStartLine; i <= oldEndLine; i++) out.push(`-${oldLines[i]}`);
+  for (let i = oldStartLine; i <= newEndLine; i++) out.push(`+${newLines[i]}`);
+  for (let i = oldEndLine + 1; i < he; i++) out.push(` ${oldLines[i]}`);
+  return out.join("\n");
+}
+
 interface CommandResult {
   exitCode: number;
   output: string;
@@ -274,6 +319,8 @@ interface ToolArgs {
   expect?: string;
   limit?: number;
   pattern?: string;
+  old_string?: string;
+  new_string?: string;
   updates?: TodoUpdate[];
   append?: { title: string; detail?: string }[];
 }
@@ -367,6 +414,78 @@ export const tools: AgentTool<any>[] = [
           },
         ],
         details: { path: params.path },
+      };
+    },
+  },
+  {
+    name: "edit_file",
+    label: TOOL_META["edit_file"].label,
+    description:
+      "精准编辑：用 new_string 替换文件中唯一匹配的 old_string（支持跨行，必须精确一致且唯一）。返回变更的 unified diff 便于核对。找不到或匹配多次时拒绝修改，需调整后重试。属于敏感操作，需要用户确认。",
+    parameters: Type.Object({
+      path: Type.String({ description: "相对文件路径" }),
+      old_string: Type.String({
+        description: "要替换的原文（必须与文件内容完全一致，且只出现一次）",
+      }),
+      new_string: Type.String({
+        description: "替换后的新文本（可为空串表示删除该段）",
+      }),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
+      const file = resolveInWorkdirOrThrow(params.path);
+      if (params.old_string === undefined) {
+        throw new Error("edit_file 缺少必需参数 old_string");
+      }
+      if (params.new_string === undefined) {
+        throw new Error("edit_file 缺少必需参数 new_string");
+      }
+      if (params.old_string.length === 0) {
+        throw new Error("old_string 不能为空，请指定要替换的原文片段");
+      }
+      const oldText = await fs.readFile(file, "utf-8");
+      const idx = oldText.indexOf(params.old_string);
+      if (idx === -1) {
+        throw new Error(
+          `未在 ${params.path} 中找到要替换的原文，请提供与文件内容完全一致的 old_string`,
+        );
+      }
+      if (oldText.indexOf(params.old_string, idx + 1) !== -1) {
+        throw new Error(
+          `old_string 在 ${params.path} 中出现多次，请包含更多前后文使其唯一`,
+        );
+      }
+      const newText =
+        oldText.slice(0, idx) +
+        params.new_string +
+        oldText.slice(idx + params.old_string.length);
+      const oldLines = oldText.split("\n");
+      const newLines = newText.split("\n");
+      const oldStartLine = countNewlines(oldText.slice(0, idx));
+      const oldEndLine = countNewlines(oldText.slice(0, idx + params.old_string.length));
+      const newEndLine = countNewlines(newText.slice(0, idx + params.new_string.length));
+      const diff = buildEditDiff(
+        params.path,
+        oldLines,
+        newLines,
+        oldStartLine,
+        oldEndLine,
+        newEndLine,
+      );
+      await fs.writeFile(file, newText, "utf-8");
+      return {
+        content: [
+          {
+            type: "text",
+            text: `已精准编辑 ${params.path}：\n${diff}`,
+          },
+        ],
+        details: {
+          path: params.path,
+          oldLines: oldEndLine - oldStartLine + 1,
+          newLines: newEndLine - oldStartLine + 1,
+          diff,
+        },
       };
     },
   },
@@ -683,6 +802,51 @@ export const tools: AgentTool<any>[] = [
           },
         ],
         details: { query: params.query, count: hits.length, hits },
+      };
+    },
+  },
+  {
+    name: "find",
+    label: TOOL_META["find"].label,
+    description:
+      "按文件名 glob 在工作区（agent-workdir）内递归查找文件（跳过 node_modules/.git 等无关目录）。支持 ** 跨层级、* 单段、? 单字符；纯文件名模式如 '*.md' 自动匹配任意层级。与 search_files（按内容搜索）互补。",
+    parameters: Type.Object({
+      pattern: Type.String({ description: "文件名 glob 模式，如 *.ts / src/**/*.tsx / *.md" }),
+      path: Type.Optional(
+        Type.String({ description: "限定搜索的子目录（相对路径，默认整个工作区）" }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: 100,
+          description: "最大返回条数，默认 20",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs;
+      if (!params.pattern) throw new Error("find 缺少必需参数 pattern");
+      const hits = await findInWorkdir(params.pattern, params.path, params.limit ?? 20);
+      if (hits.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `在工作区中未找到文件名匹配 "${params.pattern}" 的文件${params.path ? `（限定目录 ${params.path}）` : ""}`,
+            },
+          ],
+          details: { pattern: params.pattern, hits: [] },
+        };
+      }
+      const text = hits.map((h) => `${h.path}  (${h.size} B)`).join("\n");
+      return {
+        content: [
+          {
+            type: "text",
+            text: `找到 ${hits.length} 个匹配文件${hits.length >= (params.limit ?? 20) ? "（已达上限）" : ""}：\n${text}`,
+          },
+        ],
+        details: { pattern: params.pattern, count: hits.length, hits },
       };
     },
   },

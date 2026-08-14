@@ -21,11 +21,13 @@ const READWRITE_EXPECTED = new Set([
   "copy_file",
   "delete_file",
   "run_bash",
+  "spawn_subagent",
 ]);
 const READONLY_EXPECTED = new Set([
   "list_dir",
   "read_file",
   "verify_file",
+  "find",
   "todo_create",
   "todo_modify",
   "todo_list",
@@ -34,6 +36,7 @@ const READONLY_EXPECTED = new Set([
   "search_files",
   "env_info",
   "port_check",
+  "plan_propose",
 ]);
 
 console.log("== TOOL_META 基本完整性 ==");

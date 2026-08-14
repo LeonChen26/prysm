@@ -46,4 +46,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   run_bash: { label: "执行命令", type: "系统", capability: "readwrite", sensitive: true, surface: "coding" },
   env_info: { label: "环境信息", type: "系统", capability: "readonly", surface: "coding" },
   port_check: { label: "端口查询", type: "系统", capability: "readonly", surface: "coding" },
+  // 编排/计划工具：两形态通用（未标 surface），提示词工具清单可见
+  spawn_subagent: { label: "派生子 agent", type: "任务", capability: "readwrite" },
+  plan_propose: { label: "提出执行计划", type: "任务", capability: "readonly" },
 };

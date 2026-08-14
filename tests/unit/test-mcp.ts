@@ -203,7 +203,7 @@ console.log("\n== resolveAgentTools：默认注册表含内置 + MCP ==");
   const names = new Set(all.map((t) => t.name));
   expectEq("含内置工具", names.has("list_dir"), true);
   expectEq("含 MCP 工具", names.has("mcp__mock__hello"), true);
-  expectEq("工具总量 = 内置 + MCP", all.length, 23); // 20 内置（含 spawn_subagent/plan_propose）+ 3 MCP
+  expectEq("工具总量 = 内置 + MCP", all.length, 25); // 22 内置（含 spawn_subagent/plan_propose/edit_file/find）+ 3 MCP
 }
 
 console.log("\n== McpClientPool：close 后状态清空 ==");
