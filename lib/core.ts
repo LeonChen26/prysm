@@ -110,6 +110,8 @@ export function createCore(config: PrysmConfig): PrysmCore {
   if (config.mcpConfigPath) configureMcp(config.mcpConfigPath);
 
   const eventBus = new SimpleEventBus();
+  // 已接入 bus 的 agent 实例集合（WeakSet 不阻止实例回收）：保证每个 agent 只注册一次监听器
+  const subscribedAgents = new WeakSet<Agent>();
   // Phase 7.5：核心层直接 emit AgentEventBus —— 审批/计划生命周期事件注入共享 bus（带 sessionId 供壳侧按会话隔离）。
   // 事件均为纯 JSON 可序列化对象，SSE / Electron IPC 可直接透传。
   subscribeApprovalLifecycle((e) => {
@@ -186,13 +188,19 @@ export function createCore(config: PrysmConfig): PrysmCore {
 
   return {
     // Phase 7.5：核心层直接 emit —— agent 事件经 mapEvent 注入共享 bus（带 sessionId 供壳侧按会话隔离）。
+    // 注意：agent 实例按 sessionId 缓存复用，必须确保每个 agent 只注册一次监听器，
+    // 否则多次调用 getAgent（每次 POST/GET）会让同一 delta 事件被重复 emit 到 bus，
+    // 前端流式文本随之被重复拼接（如 "edit_file" → "editeditedit_file_file_file"）。
     getAgent: async (sessionId) => {
       const a = await getAgent(sessionId);
-      a.subscribe((evt) => {
-        const ui = mapEvent(evt);
-        if (!ui) return;
-        eventBus.emit({ ...ui, sessionId });
-      });
+      if (!subscribedAgents.has(a)) {
+        subscribedAgents.add(a);
+        a.subscribe((evt) => {
+          const ui = mapEvent(evt);
+          if (!ui) return;
+          eventBus.emit({ ...ui, sessionId });
+        });
+      }
       return a;
     },
     listSessions,
