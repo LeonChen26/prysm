@@ -2634,32 +2634,6 @@ export function ChatPanel() {
               })()
             )}
           </div>
-          <div className="session-foot">
-            <button
-              type="button"
-              className="session-foot-btn"
-              onClick={exportBackup}
-              title="导出全部会话、记忆与任务计划"
-            >
-              ⬇ 备份
-            </button>
-            <label
-              className="session-foot-btn session-foot-btn-accent"
-              title="从备份 JSON 恢复（会覆盖当前数据）"
-            >
-              ⬆ 恢复
-              <input
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) restoreBackup(f);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          </div>
             </>
           )}
 
@@ -2774,6 +2748,8 @@ export function ChatPanel() {
                   toggleTheme={toggleTheme}
                   notifyOn={notifyOn}
                   toggleNotify={toggleNotify}
+                  onExportBackup={exportBackup}
+                  onRestoreBackup={restoreBackup}
                 />
               </div>
             </>

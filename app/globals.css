@@ -852,43 +852,6 @@ body.resizing {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent);
 }
 
-/* 会话面板底部：备份 / 恢复 */
-.session-foot {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.session-foot-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 6px 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-
-.session-foot-btn:hover {
-  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
-  color: var(--brand);
-}
-
-.session-foot-btn-accent {
-  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
-  color: var(--brand);
-  background: var(--brand-soft);
-}
-
 /* ---------- Chat ---------- */
 .chat {
   display: flex;

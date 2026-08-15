@@ -62,6 +62,8 @@ interface SettingsPanelProps {
   toggleTheme: () => void;
   notifyOn: boolean;
   toggleNotify: () => void;
+  onExportBackup: () => void;
+  onRestoreBackup: (file: File) => void;
 }
 
 type Msg = { type: "ok" | "err"; text: string };
@@ -106,6 +108,8 @@ export function SettingsPanel({
   toggleTheme,
   notifyOn,
   toggleNotify,
+  onExportBackup,
+  onRestoreBackup,
 }: SettingsPanelProps) {
   // ---------------- 模型 / Provider ----------------
   const [roles, setRoles] = useState<RoleInfo[]>([]);
@@ -749,6 +753,32 @@ export function SettingsPanel({
           </div>
         ))}
         <StatusMsg msg={skillMsg} />
+      </div>
+
+      {/* 数据备份 / 恢复 */}
+      <div className="settings-section">
+        <div className="settings-label">数据备份 / 恢复</div>
+        <div className="settings-note">
+          备份导出全部会话、记忆与任务计划为 JSON；恢复会覆盖当前数据，建议恢复前先备份。
+        </div>
+        <div className="settings-row">
+          <button className="settings-chip" onClick={onExportBackup}>
+            ⬇ 备份
+          </button>
+          <label className="settings-chip" title="从备份 JSON 恢复（会覆盖当前数据）">
+            ⬆ 恢复
+            <input
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onRestoreBackup(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
       </div>
     </>
   );
