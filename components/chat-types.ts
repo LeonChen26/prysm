@@ -402,11 +402,18 @@ export interface OptimizationSuggestion {
   comment?: string;
 }
 
+/** AI 评分趋势点（按运行时间升序，供趋势可视化） */
+export interface JudgeTrendPoint {
+  score: number;
+  at: number;
+}
+
 /** GET /api/insights 返回的观测 + 评估聚合 */
 export interface InsightsOverview {
   runs: InsightRun[];
   summary: InsightsSummary;
   suggestions: OptimizationSuggestion[];
+  judgeTrend: JudgeTrendPoint[];
 }
 
 export const GROUP_ORDER = ["今天", "昨天", "7天内", "更早"];

@@ -491,6 +491,67 @@ freshDb();
   expectEq("高分不产生建议", ov.suggestions.length, 0);
 }
 
+// ---------- 9. getInsightsOverview：AI 评分趋势 ----------
+console.log("\n== getInsightsOverview：AI 评分趋势（按运行时间升序） ==");
+freshDb();
+{
+  recordRun({
+    sessionId: "sess-trend-1",
+    title: "早期",
+    startedAt: 1000,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+  });
+  const r1 = getRuns(10).find((r) => r.sessionId === "sess-trend-1")!.id;
+  recordRun({
+    sessionId: "sess-trend-2",
+    title: "晚期",
+    startedAt: 3000,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+  });
+  const r2 = getRuns(10).find((r) => r.sessionId === "sess-trend-2")!.id;
+  // 乱序评分（后运行先评分），验证趋势按运行时间而非写入序排序
+  addScore({
+    sessionId: "sess-trend-2",
+    runId: r2,
+    kind: "rule",
+    label: "llm_judge",
+    score: 9,
+  });
+  addScore({
+    sessionId: "sess-trend-1",
+    runId: r1,
+    kind: "rule",
+    label: "llm_judge",
+    score: 6,
+  });
+  const ov = getInsightsOverview();
+  expectEq("趋势条数", ov.judgeTrend.length, 2);
+  expectEq(
+    "趋势按运行时间升序（先 6 后 9）",
+    ov.judgeTrend.map((p) => p.score),
+    [6, 9],
+  );
+  expectEq("趋势点 at 取运行开始时间", ov.judgeTrend[0].at, 1000);
+}
+
+console.log("\n== getInsightsOverview：无评分 → 趋势为空 ==");
+freshDb();
+{
+  recordRun({
+    sessionId: "sess-trend-none",
+    title: "无评分",
+    startedAt: 1,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+  });
+  expectEq("无评分时趋势为空", getInsightsOverview().judgeTrend.length, 0);
+}
+
 // ---------- 清理 ----------
 clearRuns();
 resetConfig();

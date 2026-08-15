@@ -237,11 +237,19 @@ export interface OptimizationSuggestion {
   comment?: string;
 }
 
-/** 观测 + 评估聚合：运行记录（附带各自评分）+ 汇总统计 + 优化建议 */
+/** AI 评分趋势点（按运行时间升序，供趋势可视化） */
+export interface JudgeTrendPoint {
+  score: number;
+  /** 对应运行开始时间（毫秒） */
+  at: number;
+}
+
+/** 观测 + 评估聚合：运行记录（附带各自评分）+ 汇总统计 + 优化建议 + 评分趋势 */
 export function getInsightsOverview(runLimit = 100): {
   runs: (RunLogEntry & { scores: Score[] })[];
   summary: InsightsSummary;
   suggestions: OptimizationSuggestion[];
+  judgeTrend: JudgeTrendPoint[];
 } {
   const d = getDb();
   const count = (sql: string): number => {
@@ -298,6 +306,19 @@ export function getInsightsOverview(runLimit = 100): {
     if (c > 0) suggestions.push({ type, count: c });
   }
 
+  // AI 评分趋势：按运行时间升序（关联 turns.started_at），供迷你折线可视化
+  const judgeTrend: JudgeTrendPoint[] = (
+    d
+      .prepare(
+        `SELECT s.score AS score, t.started_at AS at
+         FROM scores s
+         LEFT JOIN turns t ON t.id = s.run_id
+         WHERE s.kind = 'rule' AND s.label = 'llm_judge' AND s.score IS NOT NULL
+         ORDER BY t.started_at ASC, s.id ASC`,
+      )
+      .all() as { score: number; at: number }[]
+  ).map((r) => ({ score: Number(r.score), at: Number(r.at) }));
+
   const scores = listScores();
   const byRun = new Map<number, Score[]>();
   for (const s of scores) {
@@ -331,5 +352,6 @@ export function getInsightsOverview(runLimit = 100): {
             ) / 10,
     },
     suggestions,
+    judgeTrend,
   };
 }

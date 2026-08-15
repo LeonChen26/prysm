@@ -57,6 +57,7 @@ import {
   type UsageInfo,
   type ContextAnalysis,
   type InsightsOverview,
+  type JudgeTrendPoint,
 } from "./chat-types";
 
 /** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
@@ -81,6 +82,54 @@ function CardResultView({ result }: { result: string }) {
     <DiffView text={result} />
   ) : (
     <pre className="card-result">{result}</pre>
+  );
+}
+
+/** AI 评分迷你趋势图（评估面板）：按运行时间序画折线，7 分以下为低分点 */
+function JudgeTrendChart({ trend }: { trend: JudgeTrendPoint[] }) {
+  if (trend.length < 1) return null;
+  const W = 100;
+  const H = 40;
+  const PAD = 4;
+  const y = (s: number) => PAD + ((10 - s) / 10) * (H - 2 * PAD);
+  const n = trend.length;
+  const x = (i: number) =>
+    n === 1 ? W / 2 : PAD + (i / (n - 1)) * (W - 2 * PAD);
+  const pts = trend
+    .map((p, i) => `${x(i).toFixed(1)},${y(p.score).toFixed(1)}`)
+    .join(" ");
+  return (
+    <div className="insights-trend">
+      <div className="insights-trend-head">
+        <span className="insights-trend-title">AI 评分趋势</span>
+        <span className="insights-trend-hint">7 分以下为低分</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="insights-trend-svg"
+      >
+        <line
+          x1={PAD}
+          y1={y(7)}
+          x2={W - PAD}
+          y2={y(7)}
+          className="insights-trend-threshold"
+        />
+        <polyline points={pts} className="insights-trend-line" />
+        {trend.map((p, i) => (
+          <circle
+            key={i}
+            cx={x(i)}
+            cy={y(p.score)}
+            r="1.8"
+            className={`insights-trend-dot ${p.score < 7 ? "low" : "ok"}`}
+          >
+            <title>{`${p.score}/10`}</title>
+          </circle>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -3790,6 +3839,8 @@ export function ChatPanel() {
                         </span>
                       </div>
                     </div>
+
+                    <JudgeTrendChart trend={insights.judgeTrend} />
 
                     {insights.suggestions.length > 0 && (
                       <div className="insights-suggest">
