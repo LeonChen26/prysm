@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import ReactMarkdown from "react-markdown";
@@ -529,6 +530,12 @@ export function ChatPanel() {
   const [notifyOn, setNotifyOn] = useState(false);
   /** Surface 形态：Work（办公自动化）/ Coding（编码） */
   const [surface, setSurface] = useState<"work" | "coding">("coding");
+  /** 新建会话绑定目录选择器 */
+  const [dirPickerOpen, setDirPickerOpen] = useState(false);
+  const [dirPickerValue, setDirPickerValue] = useState("");
+  const [dirPickerRoots, setDirPickerRoots] = useState<
+    { id: string; name: string; root: string; authorized: number }[]
+  >([]);
   /** 右侧面板是否折叠：Work 形态默认收起以专注对话，Coding 形态展开 */
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   /** 左栏视图：会话列表 / 文件浏览器 / 设置 */
@@ -553,6 +560,16 @@ export function ChatPanel() {
   );
   /** 输入框模型下拉是否展开 */
   const [modelOpen, setModelOpen] = useState(false);
+  /** 输入框审批模式下拉是否展开 */
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  /** 审批模式：手动（默认） / 自动（到达即批准，持久化到 localStorage）。
+   *  注意：初始值固定 manual，挂载后再从 localStorage 读取，避免 SSR 水合不一致。 */
+  const [approvalMode, setApprovalMode] = useState<"manual" | "auto">("manual");
+  /** 待发送的图片附件（多模态，随消息传给 /api/agent） */
+  const [pendingImages, setPendingImages] = useState<
+    { id: string; dataUrl: string; mimeType: string; name: string }[]
+  >([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   /** 工作区文件浏览器 */
   const [wbDirs, setWbDirs] = useState<
     Record<string, { name: string; isDir: boolean; size: number; mtime: number }[]>
@@ -1435,6 +1452,7 @@ export function ChatPanel() {
       rewindToText?: string,
       appendUser = true,
       overrideSessionId?: string | null,
+      images?: { data: string; mimeType: string }[],
     ) => {
       const t = text.trim();
       if (!t || busyRef.current) return;
@@ -1470,6 +1488,7 @@ export function ChatPanel() {
             message: t,
             sessionId: overrideSessionId === undefined ? sessionId : overrideSessionId,
             rewindToText,
+            ...(images && images.length > 0 ? { images } : {}),
           }),
         });
         if (!res.ok || !res.body) {
@@ -1663,13 +1682,13 @@ export function ChatPanel() {
 
   /** 新建会话（携带当前 surface 形态；preset 可选：创建后立即以该提示词发起任务） */
   const newSession = useCallback(
-    async (preset?: string) => {
+    async (preset?: string, workdir?: string) => {
       if (busy) return;
       try {
         const res = await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ surface }),
+          body: JSON.stringify({ surface, workdir }),
         });
         const data = await res.json();
         const s = data?.session as SessionInfo | undefined;
@@ -1693,6 +1712,32 @@ export function ChatPanel() {
     },
     [busy, surface, streamReply],
   );
+
+  /** 打开目录选择器（coding 新建会话时选择绑定目录） */
+  const openDirPicker = useCallback(async () => {
+    try {
+      const r = await fetch("/api/workspaces");
+      const data = await r.json();
+      if (Array.isArray(data?.workspaces)) setDirPickerRoots(data.workspaces);
+    } catch {
+      /* 静默 */
+    }
+    setDirPickerValue("");
+    setDirPickerOpen(true);
+  }, []);
+
+  /** 确认目录选择：以绑定目录创建 coding 会话（未输入则用默认工作区） */
+  const confirmDirPicker = useCallback(async () => {
+    const dir = dirPickerValue.trim();
+    setDirPickerOpen(false);
+    await newSession(undefined, dir || undefined);
+  }, [dirPickerValue, newSession]);
+
+  /** 会话列表新建按钮：coding 时先选目录，work 直接新建 */
+  const handleNewSession = useCallback(() => {
+    if (surface === "coding") void openDirPicker();
+    else void newSession();
+  }, [surface, openDirPicker, newSession]);
 
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
   const send = useCallback(async () => {
@@ -1727,15 +1772,21 @@ export function ChatPanel() {
           break; // 非命令则按普通消息发送
       }
     }
+    // 提取并清空待发送的图片附件（多模态）
+    const images = pendingImages.map((img) => ({
+      data: img.dataUrl.split(",")[1] ?? "",
+      mimeType: img.mimeType,
+    }));
+    setPendingImages([]);
     if (editingIndex >= 0 && messages[editingIndex]?.role === "user") {
       const idx = editingIndex;
       setEditingIndex(-1);
       // 截断到该条用户消息并替换为编辑后的内容，后端按 rewindToText 同步截断历史
       setMessages((m) => m.slice(0, idx).concat([{ role: "user", text }]));
-      await streamReply(text, text, false);
+      await streamReply(text, text, false, undefined, images);
       return;
     }
-    await streamReply(text);
+    await streamReply(text, undefined, true, undefined, images);
   }, [
     input,
     streamReply,
@@ -1746,6 +1797,7 @@ export function ChatPanel() {
     clearSession,
     exportSession,
     toggleTheme,
+    pendingImages,
   ]);
 
   /** 进入消息编辑态：载入输入框并聚焦 */
@@ -2032,6 +2084,100 @@ export function ChatPanel() {
     }
   }, []);
 
+  /** 审批模式持久化到 localStorage */
+  useEffect(() => {
+    try {
+      localStorage.setItem("prysm.approvalMode", approvalMode);
+    } catch {
+      /* 忽略 */
+    }
+  }, [approvalMode]);
+
+  /** 挂载后读取上次保存的审批模式（仅在客户端执行，避免水合不一致） */
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("prysm.approvalMode");
+      if (saved === "auto" || saved === "manual") setApprovalMode(saved);
+    } catch {
+      /* 忽略 */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** 自动审批：审批请求到达即批准 */
+  useEffect(() => {
+    if (approvalMode !== "auto") return;
+    approvals.forEach((item) => {
+      if (!item.deciding) void decideApproval(item.id, true);
+    });
+  }, [approvalMode, approvals, decideApproval]);
+
+  /** 自动审批：计划提案到达即批准执行 */
+  useEffect(() => {
+    if (approvalMode !== "auto") return;
+    plans.forEach((p) => {
+      if (!p.deciding && typeof p.decided !== "boolean" && !p.cancelled) {
+        void decidePlan(p.id, true);
+      }
+    });
+  }, [approvalMode, plans, decidePlan]);
+
+  /** 读取图片文件并加入待发送附件（校验 MIME 与大小，上限 10MB） */
+  const addImageFiles = useCallback((files: File[] | FileList) => {
+    const ALLOWED = new Set([
+      "image/png",
+      "image/jpeg",
+      "image/gif",
+      "image/webp",
+      "image/svg+xml",
+    ]);
+    const MAX = 10 * 1024 * 1024;
+    Array.from(files).forEach((file) => {
+      if (!ALLOWED.has(file.type)) {
+        setError(`不支持的图片类型：${file.name}（仅 png/jpeg/gif/webp/svg）`);
+        return;
+      }
+      if (file.size > MAX) {
+        setError(`图片过大：${file.name}（上限 10MB）`);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result ?? "");
+        setPendingImages((list) => [
+          ...list,
+          {
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            dataUrl,
+            mimeType: file.type,
+            name: file.name,
+          },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
+  const removePendingImage = useCallback((id: string) => {
+    setPendingImages((list) => list.filter((img) => img.id !== id));
+  }, []);
+
+  /** 粘贴图片到输入框（多模态附件） */
+  const handlePaste = useCallback(
+    (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const files = items
+        .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+        .map((it) => it.getAsFile())
+        .filter((f): f is File => !!f);
+      if (files.length > 0) {
+        e.preventDefault();
+        addImageFiles(files);
+      }
+    },
+    [addImageFiles],
+  );
+
   /** 中断当前正在执行的任务 */
   const stop = useCallback(async () => {
     if (!sessionId) return;
@@ -2194,7 +2340,7 @@ export function ChatPanel() {
       const k = e.key.toLowerCase();
       if (k === "n") {
         e.preventDefault();
-        newSession();
+        handleNewSession();
       } else if (k === "k") {
         e.preventDefault();
         sessionSearchRef.current?.focus();
@@ -2203,7 +2349,7 @@ export function ChatPanel() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newSession]);
+  }, [handleNewSession]);
 
   /** 渲染工作区目录树（递归，懒加载；缩进与分支线由 .wb-children 提供） */
   const renderWbTree = (dir: string): React.ReactNode => {
@@ -2442,7 +2588,7 @@ export function ChatPanel() {
                 </button>
                 <button
                   className="session-new"
-                  onClick={() => newSession()}
+                  onClick={handleNewSession}
                   disabled={busy}
                   title="新建会话"
                 >
@@ -3304,167 +3450,221 @@ export function ChatPanel() {
                 </button>
               </div>
             )}
-            <div className="input-toolbar">
-              {modelRoutes && (() => {
-                const route = modelRoutes.routes.orchestrator;
-                const usable = modelRoutes.providers.filter((p) => p.hasApiKey);
-                return (
-                  <div className="input-model">
+            <div className="composer">
+              {/* 文本输入区 */}
+              <div className="composer-body">
+                <textarea
+                  className="chat-input"
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    e.target.style.height = "auto";
+                    e.target.style.height = Math.min(e.target.scrollHeight, 168) + "px";
+                  }}
+                  onPaste={handlePaste}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      send();
+                      return;
+                    }
+                    if (e.key === "ArrowUp" && !e.shiftKey && !busyRef.current) {
+                      if (input.trim() && editingIndex < 0) return;
+                      const startFrom = editingIndex >= 0 ? editingIndex : messages.length;
+                      for (let i = startFrom - 1; i >= 0; i--) {
+                        if (messages[i].role === "user") {
+                          e.preventDefault();
+                          startEdit(i);
+                          break;
+                        }
+                      }
+                    }
+                  }}
+                  placeholder="描述任务…（/help 查看命令，Enter 发送）"
+                  disabled={busy}
+                  rows={1}
+                />
+              </div>
+              {/* 图片附件预览 */}
+              {pendingImages.length > 0 && (
+                <div className="composer-attach">
+                  {pendingImages.map((img) => (
+                    <div key={img.id} className="composer-attach-item">
+                      <img src={img.dataUrl} alt={img.name} />
+                      <button
+                        type="button"
+                        onClick={() => removePendingImage(img.id)}
+                        aria-label="移除图片"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* 底部工具栏 */}
+              <div className="composer-toolbar">
+                <div className="composer-toolbar-left">
+                  {/* + 添加附件 */}
+                  <button
+                    type="button"
+                    className="toolbar-btn"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="添加图片"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </button>
+                  {/* 审批模式下拉 */}
+                  <div className="toolbar-dropdown">
                     <button
                       type="button"
-                      className="input-model-btn"
-                      onClick={() => setModelOpen((v) => !v)}
+                      className={`toolbar-dropdown-btn${approvalMode === "auto" ? " auto" : ""}`}
+                      onClick={() => setApprovalOpen((v) => !v)}
+                      title={approvalMode === "auto" ? "自动审批" : "手动审批"}
                     >
-                      <span className="input-model-dot" />
-                      <span className="input-model-name">
-                        {route?.model ?? "未配置"}
-                      </span>
-                      <svg
-                        className="input-model-chev"
-                        width="10"
-                        height="10"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      </svg>
+                      <span>{approvalMode === "auto" ? "自动审批" : "手动审批"}</span>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M6 9l6 6 6-6" />
                       </svg>
                     </button>
-                    {modelOpen && (
+                    {approvalOpen && (
                       <>
-                        <div
-                          className="input-model-backdrop"
-                          onClick={() => setModelOpen(false)}
-                        />
-                        <div className="input-model-pop">
-                          {usable.length === 0 && (
-                            <div className="input-model-empty">
-                              未检测到可用 API Key，请先配置环境变量
-                            </div>
-                          )}
-                          {usable.map((p) => (
-                            <div className="input-model-group" key={p.id}>
-                              <div className="input-model-group-name">
-                                {p.name}
-                              </div>
-                              {p.models.map((m) => {
-                                const isActive =
-                                  route?.provider === p.id &&
-                                  route?.model === m.id;
-                                return (
-                                  <button
-                                    type="button"
-                                    key={m.id}
-                                    className={`input-model-opt ${
-                                      isActive ? "active" : ""
-                                    }`}
-                                    onClick={() => {
-                                      void switchModel(p.id, m.id);
-                                      setModelOpen(false);
-                                    }}
-                                  >
-                                    <span>{m.id}</span>
-                                    {isActive && (
-                                      <svg
-                                        width="11"
-                                        height="11"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="3"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                      >
-                                        <path d="M20 6L9 17l-5-5" />
-                                      </svg>
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ))}
+                        <div className="toolbar-dropdown-backdrop" onClick={() => setApprovalOpen(false)} />
+                        <div className="toolbar-dropdown-menu">
+                          <button
+                            type="button"
+                            className={`toolbar-dropdown-item${approvalMode === "manual" ? " active" : ""}`}
+                            onClick={() => { setApprovalMode("manual"); setApprovalOpen(false); }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            </svg>
+                            手动审批
+                            <span className="toolbar-dropdown-hint">敏感操作需人工确认</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`toolbar-dropdown-item${approvalMode === "auto" ? " active" : ""}`}
+                            onClick={() => { setApprovalMode("auto"); setApprovalOpen(false); }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                            </svg>
+                            自动审批
+                            <span className="toolbar-dropdown-hint">审批请求与计划到达即批准</span>
+                          </button>
                         </div>
                       </>
                     )}
                   </div>
-                );
-              })()}
-              <span className="input-dir" title="工作目录 agent-workdir">
-                <svg
-                  width="11"
-                  height="11"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                </svg>
-                ~/agent-workdir
-              </span>
+                  {/* 图片附件按钮 */}
+                  <button
+                    type="button"
+                    className="toolbar-btn toolbar-btn-image"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="添加图片"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="9" cy="9" r="2" />
+                      <path d="M21 15l-5-5L5 21" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="composer-toolbar-right">
+                  {/* 模型选择 */}
+                  {modelRoutes && (() => {
+                    const route = modelRoutes.routes.orchestrator;
+                    const usable = modelRoutes.providers.filter((p) => p.hasApiKey);
+                    return (
+                      <div className="toolbar-dropdown">
+                        <button
+                          type="button"
+                          className="toolbar-dropdown-btn toolbar-model-btn"
+                          onClick={() => setModelOpen((v) => !v)}
+                          title={route?.model ?? "未配置"}
+                        >
+                          <span className="toolbar-model-dot" />
+                          <span className="toolbar-model-name">{route?.model ?? "未配置"}</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M6 9l6 6 6-6" />
+                          </svg>
+                        </button>
+                        {modelOpen && (
+                          <>
+                            <div className="toolbar-dropdown-backdrop" onClick={() => setModelOpen(false)} />
+                            <div className="toolbar-dropdown-menu toolbar-model-pop">
+                              {usable.length === 0 && (
+                                <div className="toolbar-dropdown-empty">未检测到可用 API Key</div>
+                              )}
+                              {usable.map((p) => (
+                                <div className="toolbar-model-group" key={p.id}>
+                                  <div className="toolbar-model-group-name">{p.name}</div>
+                                  {p.models.map((m) => {
+                                    const isActive = route?.provider === p.id && route?.model === m.id;
+                                    return (
+                                      <button
+                                        type="button"
+                                        key={m.id}
+                                        className={`toolbar-dropdown-item${isActive ? " active" : ""}`}
+                                        onClick={() => { void switchModel(p.id, m.id); setModelOpen(false); }}
+                                      >
+                                        <span>{m.id}</span>
+                                        {isActive && (
+                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M20 6L9 17l-5-5" />
+                                          </svg>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {/* 发送 / 停止 */}
+                  {busy ? (
+                    <button type="button" className="toolbar-btn toolbar-stop" onClick={stop} title="停止">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      className="toolbar-send"
+                      disabled={!input.trim()}
+                      aria-label="发送"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 19V5M5 12l7-7 7 7" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  if (e.target.files) addImageFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
             </div>
-            <textarea
-              className="chat-input"
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                // 自动增高（上限 6 行）
-                e.target.style.height = "auto";
-                e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  send();
-                  return;
-                }
-                // ↑ 键：回退编辑上一条用户消息（输入为空、或编辑态中继续回退更早消息）
-                if (e.key === "ArrowUp" && !e.shiftKey && !busyRef.current) {
-                  if (input.trim() && editingIndex < 0) return; // 有未发送内容时不覆盖
-                  const startFrom = editingIndex >= 0 ? editingIndex : messages.length;
-                  for (let i = startFrom - 1; i >= 0; i--) {
-                    if (messages[i].role === "user") {
-                      e.preventDefault();
-                      startEdit(i);
-                      break;
-                    }
-                  }
-                }
-              }}
-              placeholder="描述任务…（/help 查看命令，Enter 发送）"
-              disabled={busy}
-              rows={1}
-            />
-            {busy ? (
-              <button type="button" className="btn-stop" onClick={stop}>
-                停止
-              </button>
-            ) : (
-              <button
-                type="submit"
-                className="btn-send"
-                disabled={!input.trim()}
-                aria-label="发送"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-              </button>
-            )}
           </form>
         </section>
 
@@ -4267,6 +4467,73 @@ export function ChatPanel() {
           </div>
         </aside>
       </main>
+
+      {/* 目录选择器模态框：Coding 新建会话时选择绑定目录（绑定后不可重选） */}
+      {dirPickerOpen && (
+        <>
+          <div
+            className="input-model-backdrop"
+            onClick={() => setDirPickerOpen(false)}
+          />
+          <div className="dir-picker-pop">
+            <div className="dir-picker-header">
+              <h3>选择绑定目录</h3>
+              <button
+                type="button"
+                className="dir-picker-close"
+                onClick={() => setDirPickerOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="dir-picker-body">
+              <p className="dir-picker-label">已有工作区（点击选择）：</p>
+              <div className="dir-picker-roots">
+                {dirPickerRoots.length === 0 && (
+                  <p className="dir-picker-empty">暂无已授权工作区</p>
+                )}
+                {dirPickerRoots.map((root) => (
+                  <button
+                    key={root.id}
+                    type="button"
+                    className={`dir-picker-root${
+                      dirPickerValue === root.root ? " active" : ""
+                    }`}
+                    onClick={() => setDirPickerValue(root.root)}
+                  >
+                    <span className="dir-picker-root-name">{root.name}</span>
+                    <span className="dir-picker-root-path">{root.root}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="dir-picker-label">或输入目录路径：</p>
+              <input
+                type="text"
+                className="dir-picker-input"
+                value={dirPickerValue}
+                onChange={(e) => setDirPickerValue(e.target.value)}
+                placeholder="例如：E:\projects\my-app 或 ~/code/project"
+              />
+            </div>
+            <div className="dir-picker-footer">
+              <button
+                type="button"
+                className="dir-picker-cancel"
+                onClick={() => setDirPickerOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="dir-picker-confirm"
+                onClick={confirmDirPicker}
+              >
+                确认
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

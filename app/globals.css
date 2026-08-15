@@ -1442,9 +1442,6 @@ body.resizing {
 
 /* ---------- Input bar ---------- */
 .input-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   padding: 12px 24px 20px;
   max-width: 780px;
   margin: 0 auto;
@@ -1551,41 +1548,217 @@ body.resizing {
   transform: scale(0.95);
 }
 
-/* ---------- Input bar toolbar（模型选择器 + 工作目录） ---------- */
-.input-toolbar {
-  flex-basis: 100%;
+/* ---------- Input bar composer（参考 Trae 风格：textarea 在上，单行 toolbar 在下） ---------- */
+.composer {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 24px;
-}
-
-.input-model {
-  position: relative;
-}
-
-.input-model-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 16px;
   background: var(--surface);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.input-model-btn:hover {
-  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+.composer:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+/* 文本输入区 */
+.composer-body {
+  padding: 12px 14px 4px;
+}
+
+.composer-body .chat-input {
+  width: 100%;
+  min-height: 48px;
+  max-height: 168px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  font-family: inherit;
   color: var(--text);
 }
 
-.input-model-dot {
+.composer-body .chat-input::placeholder {
+  color: var(--text-muted);
+}
+
+.composer-body .chat-input:focus {
+  border: none;
+  box-shadow: none;
+}
+
+/* 图片附件预览 */
+.composer-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 14px 0;
+}
+
+.composer-attach-item {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.composer-attach-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.composer-attach-item button {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.composer-attach-item button:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+/* 底部单行工具栏 */
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 8px;
+  gap: 4px;
+}
+
+.composer-toolbar-left,
+.composer-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 工具栏图标按钮 */
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  flex-shrink: 0;
+}
+
+.toolbar-btn:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.toolbar-stop {
+  color: var(--danger);
+}
+
+.toolbar-stop:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+/* 发送按钮（品牌色圆角方形） */
+.toolbar-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: var(--brand);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.12s ease, transform 0.1s ease;
+  flex-shrink: 0;
+}
+
+.toolbar-send:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.toolbar-send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.toolbar-send:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 下拉触发按钮 */
+.toolbar-dropdown {
+  position: relative;
+}
+
+.toolbar-dropdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.toolbar-dropdown-btn:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.toolbar-dropdown-btn.auto {
+  color: var(--brand);
+}
+
+.toolbar-dropdown-btn.auto:hover {
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+}
+
+/* 模型按钮特殊样式 */
+.toolbar-model-btn {
+  max-width: 160px;
+}
+
+.toolbar-model-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -1593,33 +1766,28 @@ body.resizing {
   flex-shrink: 0;
 }
 
-.input-model-name {
+.toolbar-model-name {
   color: var(--text);
-  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.input-model-chev {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.input-model-backdrop {
+/* 下拉菜单 */
+.toolbar-dropdown-backdrop {
   position: fixed;
   inset: 0;
   z-index: 90;
   background: transparent;
 }
 
-.input-model-pop {
+.toolbar-dropdown-menu {
   position: absolute;
+  bottom: calc(100% + 6px);
   left: 0;
-  top: calc(100% + 6px);
   z-index: 91;
-  min-width: 220px;
-  max-height: 300px;
+  min-width: 200px;
+  max-height: 280px;
   overflow: auto;
   padding: 6px;
   border: 1px solid var(--border);
@@ -1628,28 +1796,14 @@ body.resizing {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
 }
 
-.input-model-group + .input-model-group {
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid var(--border);
-}
-
-.input-model-group-name {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-muted);
-  padding: 3px 8px 2px;
-}
-
-.input-model-opt {
+.toolbar-dropdown-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 5px 8px;
+  padding: 7px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text);
   font-size: 12px;
@@ -1658,29 +1812,211 @@ body.resizing {
   transition: background 0.12s ease;
 }
 
-.input-model-opt:hover {
+.toolbar-dropdown-item:hover {
   background: var(--surface-muted);
 }
 
-.input-model-opt.active {
+.toolbar-dropdown-item.active {
   background: color-mix(in srgb, var(--brand) 12%, transparent);
   color: var(--brand);
 }
 
-.input-model-empty {
+.toolbar-dropdown-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.toolbar-dropdown-empty {
   padding: 8px;
   font-size: 11px;
   color: var(--text-muted);
 }
 
-.input-dir {
-  display: inline-flex;
+/* 模型下拉分组 */
+.toolbar-model-pop {
+  min-width: 220px;
+}
+
+.toolbar-model-group + .toolbar-model-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.toolbar-model-group-name {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 3px 8px 2px;
+}
+
+/* 目录选择器模态框（Coding 新建会话时选择绑定目录） */
+.dir-picker-pop {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 92;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.dir-picker-header {
+  display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dir-picker-header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dir-picker-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.dir-picker-close:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.dir-picker-body {
+  padding: 12px 14px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.dir-picker-label {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.dir-picker-label + .dir-picker-label {
+  margin-top: 12px;
+}
+
+.dir-picker-roots {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dir-picker-root {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.dir-picker-root:hover {
+  background: var(--surface-muted);
+}
+
+.dir-picker-root.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+}
+
+.dir-picker-root-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dir-picker-root-path {
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  word-break: break-all;
+}
+
+.dir-picker-empty {
+  margin: 0;
+  padding: 6px 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dir-picker-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dir-picker-input:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+
+.dir-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.dir-picker-cancel,
+.dir-picker-confirm {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.dir-picker-cancel {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+.dir-picker-cancel:hover {
+  background: var(--surface-muted);
+}
+
+.dir-picker-confirm {
+  border: 1px solid var(--brand);
+  background: var(--brand);
+  color: #fff;
+}
+
+.dir-picker-confirm:hover {
+  filter: brightness(1.08);
 }
 
 /* ---------- Task panel ---------- */
@@ -1810,6 +2146,58 @@ body.resizing {
   color: var(--brand);
   border-color: transparent;
   font-weight: 600;
+}
+
+/* ---------- Settings: 分类 Tab 布局 ---------- */
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 10px 16px;
+}
+
+.settings-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.settings-tab {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings-tab:hover {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.settings-tab-active {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---------- Settings: 配置管理（模型/策略/MCP/Skill） ---------- */
