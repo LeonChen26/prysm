@@ -2502,7 +2502,7 @@ export function ChatPanel() {
       </header>
 
       <main
-        className="app-main"
+        className={`app-main ${panelCollapsed ? "panel-hidden" : ""}`}
         style={
           {
             "--left-w": `${leftW}px`,

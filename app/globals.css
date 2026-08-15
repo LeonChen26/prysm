@@ -461,6 +461,13 @@ body.resizing {
   }
 }
 
+/* 面板折叠（Work 形态默认收起）时隐藏第 4 列，聊天区自动扩展至可用宽度 */
+@media (min-width: 1025px) {
+  .app-main.panel-hidden {
+    grid-template-columns: 44px var(--left-w, 240px) minmax(0, 1fr);
+  }
+}
+
 /* ---------- Session panel ---------- */
 .session-panel {
   display: flex;
@@ -1081,7 +1088,8 @@ body.resizing {
   align-items: center;
   justify-content: center;
   margin-top: 2px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .message-role svg {
@@ -1113,8 +1121,9 @@ body.resizing {
   max-width: 80%;
   background: var(--user-bubble);
   color: var(--text);
-  border-radius: 12px 12px 12px 2px;
+  border-radius: 18px 18px 4px 18px;
   padding: 10px 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .message-assistant .message-body {
