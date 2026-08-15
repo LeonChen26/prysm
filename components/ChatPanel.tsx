@@ -3791,6 +3791,34 @@ export function ChatPanel() {
                       </div>
                     </div>
 
+                    {insights.suggestions.length > 0 && (
+                      <div className="insights-suggest">
+                        <div className="insights-suggest-head">
+                          <span className="insights-suggest-title">优化建议</span>
+                          <span className="insights-suggest-hint">
+                            基于低分与规则问题聚合
+                          </span>
+                        </div>
+                        {insights.suggestions.map((s, i) => (
+                          <div className="insights-suggest-item" key={`${s.type}-${i}`}>
+                            <div className="insights-suggest-row">
+                              <span className={`insights-suggest-badge ${s.type}`}>
+                                {s.type === "llm_judge"
+                                  ? "AI 低分"
+                                  : (RULE_SCORE_LABELS[s.type] ?? s.type)}
+                              </span>
+                              <span className="insights-suggest-count">
+                                {s.count} 次
+                              </span>
+                            </div>
+                            {s.comment && (
+                              <p className="insights-suggest-comment">{s.comment}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="insights-filter">
                       {(
                         [

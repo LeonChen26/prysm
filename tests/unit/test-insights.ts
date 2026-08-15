@@ -426,6 +426,71 @@ freshDb();
   );
 }
 
+// ---------- 8. getInsightsOverview：优化建议聚合 ----------
+console.log("\n== getInsightsOverview：低分 AI 评语 + 规则问题 → 优化建议 ==");
+freshDb();
+{
+  recordRun({
+    sessionId: "sess-sug-err",
+    title: "出错",
+    startedAt: 1,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+    error: "网络超时",
+  });
+  recordRun({
+    sessionId: "sess-sug-stop",
+    title: "停止",
+    startedAt: 2,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: true,
+  });
+  const rid = getRuns(1)[0].id;
+  addScore({
+    sessionId: "sess-sug-stop",
+    runId: rid,
+    kind: "rule",
+    label: "llm_judge",
+    score: 5,
+    comment: "漏了关键步骤",
+  });
+  const ov = getInsightsOverview();
+  const types = ov.suggestions.map((s) => s.type);
+  expectTrue("低分 AI 建议排在首位", types[0] === "llm_judge", JSON.stringify(types));
+  const judge = ov.suggestions.find((s) => s.type === "llm_judge")!;
+  expectEq("低分 AI 建议次数", judge.count, 1);
+  expectEq("低分 AI 建议带评语", judge.comment, "漏了关键步骤");
+  const runErr = ov.suggestions.find((s) => s.type === "run_error")!;
+  expectEq("run_error 建议次数", runErr.count, 1);
+  const runStopped = ov.suggestions.find((s) => s.type === "run_stopped")!;
+  expectEq("run_stopped 建议次数", runStopped.count, 1);
+}
+
+console.log("\n== getInsightsOverview：无低分 / 无规则问题 → 建议为空 ==");
+freshDb();
+{
+  recordRun({
+    sessionId: "sess-sug-ok",
+    title: "正常",
+    startedAt: 1,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+    toolCalls: { write_file: 1 },
+  });
+  addScore({
+    sessionId: "sess-sug-ok",
+    kind: "rule",
+    label: "llm_judge",
+    score: 9,
+    comment: "表现良好",
+  });
+  const ov = getInsightsOverview();
+  expectEq("高分不产生建议", ov.suggestions.length, 0);
+}
+
 // ---------- 清理 ----------
 clearRuns();
 resetConfig();

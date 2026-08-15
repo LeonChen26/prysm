@@ -228,10 +228,20 @@ export interface InsightsSummary {
   avgJudgeScore: number | null;
 }
 
-/** 观测 + 评估聚合：运行记录（附带各自评分）+ 汇总统计 */
+/** 优化建议（优化环节：由评估数据聚合出的待优化项） */
+export interface OptimizationSuggestion {
+  type: "llm_judge" | "run_error" | "run_stopped" | "no_tools";
+  /** 关联次数 */
+  count: number;
+  /** 低分评语（仅 llm_judge 类型，取最低分一条） */
+  comment?: string;
+}
+
+/** 观测 + 评估聚合：运行记录（附带各自评分）+ 汇总统计 + 优化建议 */
 export function getInsightsOverview(runLimit = 100): {
   runs: (RunLogEntry & { scores: Score[] })[];
   summary: InsightsSummary;
+  suggestions: OptimizationSuggestion[];
 } {
   const d = getDb();
   const count = (sql: string): number => {
@@ -262,6 +272,31 @@ export function getInsightsOverview(runLimit = 100): {
       )
       .all() as Record<string, unknown>[]
   ).map((r) => Number(r.score));
+
+  // 优化建议：低分（<7）AI 评语 + 规则问题聚合
+  const lowJudgeCount = count(
+    "SELECT COUNT(*) AS c FROM scores WHERE kind = 'rule' AND label = 'llm_judge' AND score IS NOT NULL AND score < 7",
+  );
+  const lowJudgeRow = d
+    .prepare(
+      "SELECT comment FROM scores WHERE kind = 'rule' AND label = 'llm_judge' AND score IS NOT NULL AND score < 7 ORDER BY score ASC LIMIT 1",
+    )
+    .get() as { comment: string | null } | undefined;
+  const suggestions: OptimizationSuggestion[] = [];
+  if (lowJudgeCount > 0) {
+    suggestions.push({
+      type: "llm_judge",
+      count: lowJudgeCount,
+      comment: lowJudgeRow?.comment ?? undefined,
+    });
+  }
+  for (const [type, c] of [
+    ["run_error", runError],
+    ["run_stopped", runStopped],
+    ["no_tools", noTools],
+  ] as const) {
+    if (c > 0) suggestions.push({ type, count: c });
+  }
 
   const scores = listScores();
   const byRun = new Map<number, Score[]>();
@@ -295,5 +330,6 @@ export function getInsightsOverview(runLimit = 100): {
               (judgeScores.reduce((s, v) => s + v, 0) / judgeScores.length) * 10,
             ) / 10,
     },
+    suggestions,
   };
 }

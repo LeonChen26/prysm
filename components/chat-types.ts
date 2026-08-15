@@ -394,10 +394,19 @@ export interface InsightsSummary {
   avgJudgeScore: number | null;
 }
 
+/** 优化建议（优化环节：由评估数据聚合出的待优化项） */
+export interface OptimizationSuggestion {
+  type: "llm_judge" | "run_error" | "run_stopped" | "no_tools";
+  count: number;
+  /** 低分评语（仅 llm_judge 类型，取最低分一条） */
+  comment?: string;
+}
+
 /** GET /api/insights 返回的观测 + 评估聚合 */
 export interface InsightsOverview {
   runs: InsightRun[];
   summary: InsightsSummary;
+  suggestions: OptimizationSuggestion[];
 }
 
 export const GROUP_ORDER = ["今天", "昨天", "7天内", "更早"];

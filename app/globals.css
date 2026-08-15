@@ -2961,6 +2961,80 @@ body.resizing {
   padding-left: 8px;
 }
 
+.insights-suggest {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--brand) 3%, var(--surface));
+  padding: 8px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.insights-suggest-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.insights-suggest-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.insights-suggest-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.insights-suggest-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.insights-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.insights-suggest-badge {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+
+.insights-suggest-badge.llm_judge {
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand);
+}
+
+.insights-suggest-badge.run_error,
+.insights-suggest-badge.run_stopped,
+.insights-suggest-badge.no_tools {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+
+.insights-suggest-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.insights-suggest-comment {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  word-break: break-word;
+  border-left: 2px solid color-mix(in srgb, var(--brand) 40%, transparent);
+  padding-left: 8px;
+}
+
 /* ---------- 审批历史面板 ---------- */
 .audit-section {
   display: flex;
