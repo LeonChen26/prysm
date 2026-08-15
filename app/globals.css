@@ -374,32 +374,6 @@ body {
   background: var(--brand);
 }
 
-/* ---------- Status bar ---------- */
-.status-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  height: 28px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.status-bar-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success);
-}
-
-.status-bar-dot-busy {
-  background: var(--warning);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
 /* 侧栏拖拽手柄：悬停显示品牌色细条，拖拽中全屏 col-resize */
 .drag-handle {
   position: absolute;
@@ -1612,6 +1586,138 @@ body.resizing {
 
 .input-bar button:not(:disabled):active {
   transform: scale(0.95);
+}
+
+/* ---------- Input bar toolbar（模型选择器 + 工作目录） ---------- */
+.input-toolbar {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.input-model {
+  position: relative;
+}
+
+.input-model-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.input-model-btn:hover {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+  color: var(--text);
+}
+
+.input-model-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex-shrink: 0;
+}
+
+.input-model-name {
+  color: var(--text);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-model-chev {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.input-model-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: transparent;
+}
+
+.input-model-pop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 91;
+  min-width: 220px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+.input-model-group + .input-model-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.input-model-group-name {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 3px 8px 2px;
+}
+
+.input-model-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.input-model-opt:hover {
+  background: var(--surface-muted);
+}
+
+.input-model-opt.active {
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  color: var(--brand);
+}
+
+.input-model-empty {
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.input-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ---------- Task panel ---------- */

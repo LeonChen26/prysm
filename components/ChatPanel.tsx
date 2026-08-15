@@ -59,6 +59,7 @@ import {
   type InsightsOverview,
   type JudgeTrendPoint,
   type ModelStat,
+  type ModelRoutesResponse,
 } from "./chat-types";
 
 /** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
@@ -546,6 +547,12 @@ export function ChatPanel() {
   const [insightsFilter, setInsightsFilter] = useState<"all" | "issue" | "low">(
     "all",
   );
+  /** 模型路由目录（输入框模型选择器数据，GET /api/model-routes） */
+  const [modelRoutes, setModelRoutes] = useState<ModelRoutesResponse | null>(
+    null,
+  );
+  /** 输入框模型下拉是否展开 */
+  const [modelOpen, setModelOpen] = useState(false);
   /** 工作区文件浏览器 */
   const [wbDirs, setWbDirs] = useState<
     Record<string, { name: string; isDir: boolean; size: number; mtime: number }[]>
@@ -1019,6 +1026,48 @@ export function ChatPanel() {
       /* 静默 */
     }
   }, []);
+
+  /** 拉取模型路由目录（输入框模型选择器数据） */
+  const refreshModelRoutes = useCallback(async () => {
+    try {
+      const r = await fetch("/api/model-routes");
+      const data = await r.json();
+      if (data?.routes && Array.isArray(data?.providers)) {
+        setModelRoutes(data);
+      }
+    } catch {
+      /* 静默 */
+    }
+  }, []);
+
+  /** 切换主 Agent（orchestrator）模型：PUT /api/model-routes 后本地更新 */
+  const switchModel = useCallback(
+    async (provider: string, model: string) => {
+      try {
+        await fetch("/api/model-routes", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "orchestrator", provider, model }),
+        });
+        setModelRoutes((cur) =>
+          cur
+            ? {
+                ...cur,
+                routes: { ...cur.routes, orchestrator: { provider, model } },
+              }
+            : cur,
+        );
+      } catch {
+        /* 静默 */
+      }
+    },
+    [],
+  );
+
+  // 挂载时加载模型路由目录
+  useEffect(() => {
+    void refreshModelRoutes();
+  }, [refreshModelRoutes]);
 
   /** 删除单条情景记忆 */
   const removeMemory = useCallback(
@@ -3279,6 +3328,110 @@ export function ChatPanel() {
                 </button>
               </div>
             )}
+            <div className="input-toolbar">
+              {modelRoutes && (() => {
+                const route = modelRoutes.routes.orchestrator;
+                const usable = modelRoutes.providers.filter((p) => p.hasApiKey);
+                return (
+                  <div className="input-model">
+                    <button
+                      type="button"
+                      className="input-model-btn"
+                      onClick={() => setModelOpen((v) => !v)}
+                    >
+                      <span className="input-model-dot" />
+                      <span className="input-model-name">
+                        {route?.model ?? "未配置"}
+                      </span>
+                      <svg
+                        className="input-model-chev"
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                    {modelOpen && (
+                      <>
+                        <div
+                          className="input-model-backdrop"
+                          onClick={() => setModelOpen(false)}
+                        />
+                        <div className="input-model-pop">
+                          {usable.length === 0 && (
+                            <div className="input-model-empty">
+                              未检测到可用 API Key，请先配置环境变量
+                            </div>
+                          )}
+                          {usable.map((p) => (
+                            <div className="input-model-group" key={p.id}>
+                              <div className="input-model-group-name">
+                                {p.name}
+                              </div>
+                              {p.models.map((m) => {
+                                const isActive =
+                                  route?.provider === p.id &&
+                                  route?.model === m.id;
+                                return (
+                                  <button
+                                    type="button"
+                                    key={m.id}
+                                    className={`input-model-opt ${
+                                      isActive ? "active" : ""
+                                    }`}
+                                    onClick={() => {
+                                      void switchModel(p.id, m.id);
+                                      setModelOpen(false);
+                                    }}
+                                  >
+                                    <span>{m.id}</span>
+                                    {isActive && (
+                                      <svg
+                                        width="11"
+                                        height="11"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="3"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      >
+                                        <path d="M20 6L9 17l-5-5" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+              <span className="input-dir" title="工作目录 agent-workdir">
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+                ~/agent-workdir
+              </span>
+            </div>
             <textarea
               className="chat-input"
               value={input}
@@ -4138,15 +4291,6 @@ export function ChatPanel() {
           </div>
         </aside>
       </main>
-
-      {/* Status Bar */}
-      <footer className="status-bar">
-        <span className={`status-bar-dot ${busy ? "status-bar-dot-busy" : ""}`} />
-        <span>{busy ? "执行中" : "空闲"}</span>
-        <span style={{ marginLeft: "auto" }}>claude-sonnet-4-5</span>
-        <span>·</span>
-        <span>~/agent-workdir</span>
-      </footer>
     </div>
   );
 }

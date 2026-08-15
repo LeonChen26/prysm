@@ -434,6 +434,28 @@ export interface InsightsOverview {
   modelStats: ModelStat[];
 }
 
+/** 模型角色路由（GET /api/model-routes 的 routes 子项） */
+export interface ModelRouteInfo {
+  provider: string;
+  model: string;
+}
+
+/** 可选 provider 及模型目录（含鉴权状态，用于输入框模型选择器） */
+export interface ModelProviderInfo {
+  id: string;
+  name: string;
+  apiKeyEnv: string;
+  hasApiKey: boolean;
+  models: { id: string; name: string }[];
+}
+
+/** GET /api/model-routes 返回结构 */
+export interface ModelRoutesResponse {
+  routes: Record<string, ModelRouteInfo>;
+  providers: ModelProviderInfo[];
+  roles: { id: string; name: string; hint: string }[];
+}
+
 export const GROUP_ORDER = ["今天", "昨天", "7天内", "更早"];
 
 /** 会话分组：今天 / 昨天 / 7天内 / 更早 */
