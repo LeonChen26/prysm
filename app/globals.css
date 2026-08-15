@@ -1548,35 +1548,35 @@ body.resizing {
   transform: scale(0.95);
 }
 
-/* ---------- Input bar composer（参考 Trae 风格：textarea 在上，单行 toolbar 在下） ---------- */
+/* ---------- Input bar composer（Trae 风格：textarea + 单行紧凑 toolbar） ---------- */
 .composer {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 12px;
   background: var(--surface);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .composer:focus-within {
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 10%, transparent);
 }
 
 /* 文本输入区 */
 .composer-body {
-  padding: 12px 14px 4px;
+  padding: 10px 12px 0;
 }
 
 .composer-body .chat-input {
   width: 100%;
-  min-height: 48px;
-  max-height: 168px;
+  min-height: 36px;
+  max-height: 140px;
   padding: 0;
   border: none;
   background: transparent;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.5;
   resize: none;
   outline: none;
   font-family: inherit;
@@ -1585,6 +1585,7 @@ body.resizing {
 
 .composer-body .chat-input::placeholder {
   color: var(--text-muted);
+  opacity: 0.6;
 }
 
 .composer-body .chat-input:focus {
@@ -1596,16 +1597,16 @@ body.resizing {
 .composer-attach {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 14px 0;
+  gap: 6px;
+  padding: 4px 12px 0;
 }
 
 .composer-attach-item {
   position: relative;
-  width: 54px;
-  height: 54px;
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -1619,26 +1620,26 @@ body.resizing {
 
 .composer-attach-item button {
   position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 17px;
-  height: 17px;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.5);
   color: #fff;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
   cursor: pointer;
   transition: background 0.15s ease;
 }
 
 .composer-attach-item button:hover {
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.7);
 }
 
 /* 底部单行工具栏 */
@@ -1646,15 +1647,15 @@ body.resizing {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 8px 8px;
-  gap: 4px;
+  padding: 4px 8px 6px;
+  gap: 0;
 }
 
 .composer-toolbar-left,
 .composer-toolbar-right {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
 }
 
 /* 工具栏图标按钮 */
@@ -1662,11 +1663,11 @@ body.resizing {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -1684,37 +1685,38 @@ body.resizing {
 }
 
 .toolbar-stop:hover {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
   color: var(--danger);
 }
 
-/* 发送按钮（品牌色圆角方形） */
+/* 发送按钮 */
 .toolbar-send {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--brand);
   color: #fff;
   cursor: pointer;
-  transition: opacity 0.12s ease, transform 0.1s ease;
+  transition: opacity 0.12s ease, transform 0.08s ease;
   flex-shrink: 0;
+  margin-left: 4px;
 }
 
 .toolbar-send:hover:not(:disabled) {
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
 .toolbar-send:active:not(:disabled) {
-  transform: scale(0.94);
+  transform: scale(0.92);
 }
 
 .toolbar-send:disabled {
-  opacity: 0.3;
+  opacity: 0.2;
   cursor: not-allowed;
 }
 
@@ -1726,10 +1728,10 @@ body.resizing {
 .toolbar-dropdown-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 8px;
+  gap: 3px;
+  padding: 3px 6px;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
@@ -1738,6 +1740,7 @@ body.resizing {
   transition: background 0.12s ease, color 0.12s ease;
   white-space: nowrap;
   flex-shrink: 0;
+  line-height: 1.3;
 }
 
 .toolbar-dropdown-btn:hover {
@@ -1747,20 +1750,21 @@ body.resizing {
 
 .toolbar-dropdown-btn.auto {
   color: var(--brand);
+  font-weight: 600;
 }
 
 .toolbar-dropdown-btn.auto:hover {
-  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
 }
 
-/* 模型按钮特殊样式 */
+/* 模型按钮 */
 .toolbar-model-btn {
-  max-width: 160px;
+  max-width: 140px;
 }
 
 .toolbar-model-dot {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: var(--brand);
   flex-shrink: 0;
@@ -1771,6 +1775,7 @@ body.resizing {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
 }
 
 /* 下拉菜单 */
@@ -1783,33 +1788,34 @@ body.resizing {
 
 .toolbar-dropdown-menu {
   position: absolute;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 4px);
   left: 0;
   z-index: 91;
-  min-width: 200px;
-  max-height: 280px;
+  min-width: 170px;
+  max-height: 240px;
   overflow: auto;
-  padding: 6px;
+  padding: 3px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 
 .toolbar-dropdown-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 5px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background 0.1s ease;
+  line-height: 1.3;
 }
 
 .toolbar-dropdown-item:hover {
@@ -1817,8 +1823,9 @@ body.resizing {
 }
 
 .toolbar-dropdown-item.active {
-  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
   color: var(--brand);
+  font-weight: 500;
 }
 
 .toolbar-dropdown-hint {
@@ -1826,22 +1833,23 @@ body.resizing {
   font-size: 10px;
   color: var(--text-muted);
   white-space: nowrap;
+  font-weight: 400;
 }
 
 .toolbar-dropdown-empty {
-  padding: 8px;
+  padding: 5px 8px;
   font-size: 11px;
   color: var(--text-muted);
 }
 
 /* 模型下拉分组 */
 .toolbar-model-pop {
-  min-width: 220px;
+  min-width: 190px;
 }
 
 .toolbar-model-group + .toolbar-model-group {
-  margin-top: 4px;
-  padding-top: 4px;
+  margin-top: 2px;
+  padding-top: 2px;
   border-top: 1px solid var(--border);
 }
 
@@ -1849,7 +1857,7 @@ body.resizing {
   font-size: 10px;
   font-weight: 600;
   color: var(--text-muted);
-  padding: 3px 8px 2px;
+  padding: 2px 8px 1px;
 }
 
 /* 目录选择器模态框（Coding 新建会话时选择绑定目录） */

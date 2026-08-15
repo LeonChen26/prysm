@@ -24,6 +24,8 @@ export interface SessionInfo {
   pinned: number;
   /** 会话形态（创建时确定，一个会话只属于一个 surface） */
   surface: Surface;
+  /** 绑定的工作目录（创建时确定；undefined = 使用默认 agent-workdir） */
+  workdir?: string;
 }
 
 let db: DatabaseSync | undefined;
@@ -56,6 +58,9 @@ function getDb(): DatabaseSync {
   if (!cols.some((c) => c.name === "surface")) {
     d.exec("ALTER TABLE sessions ADD COLUMN surface TEXT NOT NULL DEFAULT 'coding'");
   }
+  if (!cols.some((c) => c.name === "workdir")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN workdir TEXT");
+  }
   db = d;
   return d;
 }
@@ -68,20 +73,22 @@ function rowToSession(row: Record<string, unknown>): SessionInfo {
     updatedAt: Number(row.updated_at),
     pinned: Number(row.pinned ?? 0),
     surface: row.surface === "work" ? "work" : "coding",
+    workdir: typeof row.workdir === "string" && row.workdir ? row.workdir : undefined,
   };
 }
 
 export function createSession(
   title = "新会话",
   surface: Surface = "coding",
+  workdir?: string,
 ): SessionInfo {
   const d = getDb();
   const id = randomUUID();
   const now = Date.now();
   d.prepare(
-    "INSERT INTO sessions (id, title, created_at, updated_at, pinned, surface) VALUES (?, ?, ?, ?, 0, ?)",
-  ).run(id, title, now, now, surface);
-  return { id, title, createdAt: now, updatedAt: now, pinned: 0, surface };
+    "INSERT INTO sessions (id, title, created_at, updated_at, pinned, surface, workdir) VALUES (?, ?, ?, ?, 0, ?, ?)",
+  ).run(id, title, now, now, surface, workdir ?? null);
+  return { id, title, createdAt: now, updatedAt: now, pinned: 0, surface, workdir };
 }
 
 /** 按最近更新排序的会话列表（置顶优先） */
@@ -274,7 +281,7 @@ export function restoreAllSessions(
     d.exec("DELETE FROM session_messages");
     d.exec("DELETE FROM sessions");
     const insS = d.prepare(
-      "INSERT INTO sessions (id, title, created_at, updated_at, pinned, surface) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO sessions (id, title, created_at, updated_at, pinned, surface, workdir) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const insM = d.prepare(
       "INSERT INTO session_messages (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
@@ -287,6 +294,7 @@ export function restoreAllSessions(
         s.updatedAt,
         s.pinned ?? 0,
         s.surface ?? "coding",
+        s.workdir ?? null,
       );
       for (const m of messagesBySession[s.id] ?? []) {
         insM.run(s.id, m.role, JSON.stringify(m), m.timestamp ?? Date.now());

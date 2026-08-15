@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
 import { fetchUrlAsText, webSearch } from "./web";
-import { AGENT_WORKDIR, ALLOWED_ROOTS, getAllowedRoots, getAgentWorkdir, resolveInWorkdirOrThrow } from "./paths";
+import { AGENT_WORKDIR, ALLOWED_ROOTS, getAllowedRoots, getAgentWorkdir, resolveInWorkdirOrThrow as resolveInWorkdirOrThrowBase } from "./paths";
 import { TOOL_META } from "./tool-meta";
 import type { SubagentSpec } from "./subagent";
 import { proposePlan } from "./plan";
@@ -32,6 +32,25 @@ export function setSpawnSubagentImpl(fn: SpawnSubagentImpl | undefined): void {
 let planCtx: { sessionId: string; surface: Surface } | undefined;
 export function setPlanCtx(ctx: { sessionId: string; surface: Surface } | undefined): void {
   planCtx = ctx;
+}
+
+/** 会话级工作目录覆盖（绑定目录 > 全局默认 AGENT_WORKDIR） */
+let sessionWorkdirOverride: string | undefined;
+export function setSessionWorkdirOverride(wd: string | undefined): void {
+  sessionWorkdirOverride = wd;
+}
+export function getSessionWorkdirOverride(): string | undefined {
+  return sessionWorkdirOverride;
+}
+
+/** 当前生效的工作目录：优先使用绑定目录，回退全局默认工作区 */
+function effectiveWorkdir(): string {
+  return sessionWorkdirOverride ?? AGENT_WORKDIR;
+}
+
+/** 解析工作区路径：以会话绑定目录为根（未绑定回退全局默认工作区） */
+function resolveInWorkdirOrThrow(relative: string, root?: string): string {
+  return resolveInWorkdirOrThrowBase(relative, root ?? effectiveWorkdir());
 }
 
 interface FileHit {
@@ -105,7 +124,7 @@ async function findInWorkdir(
         if (SKIP_DIRS.has(e.name)) continue;
         await walk(full);
       } else if (e.isFile()) {
-        const rel = path.relative(AGENT_WORKDIR, full).replace(/\\/g, "/");
+        const rel = path.relative(effectiveWorkdir(), full).replace(/\\/g, "/");
         if (re.test(rel)) {
           const size = (await fs.stat(full)).size;
           hits.push({ path: rel, size });
@@ -168,7 +187,7 @@ async function searchInWorkdir(
                   .join("\n");
               }
               hits.push({
-                path: path.relative(AGENT_WORKDIR, full).replace(/\\/g, "/"),
+                path: path.relative(effectiveWorkdir(), full).replace(/\\/g, "/"),
                 line: i + 1,
                 text: lines[i].slice(0, 200),
                 context: ctx,
@@ -183,7 +202,7 @@ async function searchInWorkdir(
     }
   };
 
-  await walk(AGENT_WORKDIR);
+  await walk(effectiveWorkdir());
   return hits;
 }
 
@@ -860,7 +879,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const { exitCode, output } = await runCommand(params.command, AGENT_WORKDIR);
+      const { exitCode, output } = await runCommand(params.command, effectiveWorkdir());
       const truncated =
         output.length > 8000 ? output.slice(0, 8000) + "\n...(输出已截断)" : output;
       return {
@@ -887,7 +906,7 @@ export const tools: AgentTool<any>[] = [
         `Node 版本: ${process.version}`,
         `运行时长: ${Math.floor(process.uptime() / 60)} 分钟 ${Math.floor(process.uptime() % 60)} 秒`,
         `内存占用: ${(mem.rss / 1024 / 1024).toFixed(1)} MB (rss) / ${(mem.heapUsed / 1024 / 1024).toFixed(1)} MB (heap)`,
-        `工作区目录: ${AGENT_WORKDIR}`,
+        `工作区目录: ${effectiveWorkdir()}`,
         ALLOWED_ROOTS.length > 0
           ? `白名单目录: ${ALLOWED_ROOTS.join(", ")}`
           : "白名单目录: (无)",

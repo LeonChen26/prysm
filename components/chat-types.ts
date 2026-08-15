@@ -251,6 +251,8 @@ export interface SessionInfo {
   pinned?: number;
   /** 会话形态（work/coding），Phase 1b 起由后端返回 */
   surface?: "work" | "coding";
+  /** 绑定的工作目录（Coding 创建时确定；undefined = 使用默认 agent-workdir，绑定后不可重选） */
+  workdir?: string;
 }
 
 /** 上下文构成的单个分类（GET /api/context 返回） */

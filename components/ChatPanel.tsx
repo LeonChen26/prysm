@@ -3505,18 +3505,6 @@ export function ChatPanel() {
               {/* 底部工具栏 */}
               <div className="composer-toolbar">
                 <div className="composer-toolbar-left">
-                  {/* + 添加附件 */}
-                  <button
-                    type="button"
-                    className="toolbar-btn"
-                    onClick={() => fileInputRef.current?.click()}
-                    title="添加图片"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="12" y1="5" x2="12" y2="19" />
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                    </svg>
-                  </button>
                   {/* 审批模式下拉 */}
                   <div className="toolbar-dropdown">
                     <button
@@ -3525,11 +3513,11 @@ export function ChatPanel() {
                       onClick={() => setApprovalOpen((v) => !v)}
                       title={approvalMode === "auto" ? "自动审批" : "手动审批"}
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                       </svg>
                       <span>{approvalMode === "auto" ? "自动审批" : "手动审批"}</span>
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M6 9l6 6 6-6" />
                       </svg>
                     </button>
@@ -3542,7 +3530,7 @@ export function ChatPanel() {
                             className={`toolbar-dropdown-item${approvalMode === "manual" ? " active" : ""}`}
                             onClick={() => { setApprovalMode("manual"); setApprovalOpen(false); }}
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                             </svg>
                             手动审批
@@ -3553,11 +3541,11 @@ export function ChatPanel() {
                             className={`toolbar-dropdown-item${approvalMode === "auto" ? " active" : ""}`}
                             onClick={() => { setApprovalMode("auto"); setApprovalOpen(false); }}
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                             </svg>
                             自动审批
-                            <span className="toolbar-dropdown-hint">审批请求与计划到达即批准</span>
+                            <span className="toolbar-dropdown-hint">到达即批准</span>
                           </button>
                         </div>
                       </>
@@ -3566,11 +3554,11 @@ export function ChatPanel() {
                   {/* 图片附件按钮 */}
                   <button
                     type="button"
-                    className="toolbar-btn toolbar-btn-image"
+                    className="toolbar-btn"
                     onClick={() => fileInputRef.current?.click()}
                     title="添加图片"
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="3" y="3" width="18" height="18" rx="2" />
                       <circle cx="9" cy="9" r="2" />
                       <path d="M21 15l-5-5L5 21" />
@@ -3592,7 +3580,7 @@ export function ChatPanel() {
                         >
                           <span className="toolbar-model-dot" />
                           <span className="toolbar-model-name">{route?.model ?? "未配置"}</span>
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M6 9l6 6 6-6" />
                           </svg>
                         </button>
@@ -3617,7 +3605,7 @@ export function ChatPanel() {
                                       >
                                         <span>{m.id}</span>
                                         {isActive && (
-                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                                             <path d="M20 6L9 17l-5-5" />
                                           </svg>
                                         )}
@@ -3635,7 +3623,7 @@ export function ChatPanel() {
                   {/* 发送 / 停止 */}
                   {busy ? (
                     <button type="button" className="toolbar-btn toolbar-stop" onClick={stop} title="停止">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                         <rect x="6" y="6" width="12" height="12" rx="2" />
                       </svg>
                     </button>
@@ -3646,7 +3634,7 @@ export function ChatPanel() {
                       disabled={!input.trim()}
                       aria-label="发送"
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12 19V5M5 12l7-7 7 7" />
                       </svg>
                     </button>

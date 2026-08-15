@@ -1,8 +1,8 @@
 import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { consumeStopped, generateTitle, logRun } from "@/lib/agent";
+import { consumeStopped, generateTitle, logRun, setApprovalMode } from "@/lib/agent";
 import { judgeRun } from "@/lib/judge";
-import { setPlanCtx } from "@/lib/tools";
+import { setPlanCtx, setSessionWorkdirOverride } from "@/lib/tools";
 import { rememberMessages } from "@/lib/memory";
 import { createCore } from "@/lib/core";
 import { toImageContents, extractImages } from "@/lib/attachments";
@@ -73,6 +73,7 @@ export async function POST(req: Request) {
     message?: unknown;
     sessionId?: unknown;
     rewindToText?: unknown;
+    approvalMode?: unknown;
     images?: { data?: unknown; mimeType?: unknown }[];
   };
   try {
@@ -89,6 +90,11 @@ export async function POST(req: Request) {
     .filter((img) => img && typeof img.data === "string" && img.data && typeof img.mimeType === "string")
     .map((img) => ({ data: img.data as string, mimeType: img.mimeType as string }));
   const imageContents = toImageContents(images);
+  // 同步审批模式（dangerous = 无需审批），供 makeBeforeToolCall 读取
+  const am = body?.approvalMode;
+  if (am === "manual" || am === "auto" || am === "dangerous") {
+    setApprovalMode(am);
+  }
   const session = resolveSession(body);
 
   let agent;
@@ -179,6 +185,8 @@ export async function POST(req: Request) {
       const runStartedAt = Date.now();
       // 注入 plan_propose 会话上下文（本轮 prompt 期间有效）
       setPlanCtx({ sessionId: session.id, surface: session.surface ?? "coding" });
+      // 注入会话绑定目录（coding 时文件工具以该目录为根）
+      setSessionWorkdirOverride(session.workdir);
       try {
         await a.prompt(message, imageContents.length > 0 ? imageContents : undefined);
         await a.waitForIdle();
@@ -271,6 +279,7 @@ export async function POST(req: Request) {
         }
         unsubBus();
         setPlanCtx(undefined);
+        setSessionWorkdirOverride(undefined);
         send(
           stopped
             ? { type: "stopped", message: "任务已停止" }

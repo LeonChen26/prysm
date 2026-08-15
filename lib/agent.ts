@@ -9,6 +9,7 @@ import { retrieveRagText } from "./rag";
 import { isAutoApproved, isDenied } from "./policy";
 import { assessRisk, toolSource } from "./risk";
 import { getSession, getSessionMessages } from "./session";
+import { setSessionWorkdir } from "./agent-context";
 import { resolveAgentTools } from "./tools/registry";
 import { setSpawnSubagentImpl } from "./tools";
 import type { SubagentSpec } from "./subagent";
@@ -90,6 +91,13 @@ const agentPool = new Map<string, Agent>();
 const agentModels = new Map<string, string>();
 /** 记录被用户主动停止的会话（run 结束后由路由消费） */
 const stoppedSessions = new Set<string>();
+
+/** 当前审批模式（由 /api/agent 请求体同步；dangerous = 跳过所有审批与拦截） */
+let approvalMode: "manual" | "auto" | "dangerous" = "manual";
+
+export function setApprovalMode(mode: "manual" | "auto" | "dangerous"): void {
+  approvalMode = mode;
+}
 
 export function markStopped(sessionId: string): void {
   stoppedSessions.add(sessionId);
@@ -296,6 +304,15 @@ function makeBeforeToolCall(
       return undefined;
     }
 
+    // dangerous 模式：不做任何审批与拦截，直接放行（落审计留痕）
+    if (approvalMode === "dangerous") {
+      logApproval(toolCall.name, args, "auto", {
+        sessionId,
+        reason: "dangerous 模式，无需审批",
+      });
+      return undefined;
+    }
+
     // 1) 强制拦截（deny 优先于 allow）
     const deny = isDenied(toolCall.name, args);
     if (deny.denied) {
@@ -354,6 +371,9 @@ export async function getAgent(sessionId: string): Promise<Agent> {
   const messages = getSessionMessages(sessionId);
   // Phase 7：会话形态驱动提示词角色定位与工具集筛选
   const surface = getSession(sessionId)?.surface ?? "coding";
+  // 绑定目录：会话创建时确定，Agent 工具/命令以此为根（未绑定回退全局默认工作区）
+  const workdir = getSession(sessionId)?.workdir;
+  if (workdir) setSessionWorkdir(sessionId, workdir);
   const basePrompt = buildSystemPrompt(getAllowedRoots(), surface);
   // Phase 4：已启用技能的正文拼入系统提示词
   const skillPrompt = buildSkillPrompt();
