@@ -26,6 +26,20 @@
   --glass-border: var(--border);
   --glass-blur: none;
   --bg-glow: transparent;
+  /* 通用图标按钮（主题/通知/面板切换等）：随 --text 自动适配浅/深色 */
+  --icon-btn: color-mix(in srgb, var(--text) 8%, transparent);
+  --icon-btn-hover: color-mix(in srgb, var(--text) 16%, transparent);
+}
+
+/* 文本选区：品牌紫底色 */
+::selection {
+  background: color-mix(in srgb, var(--brand) 24%, transparent);
+}
+
+/* 键盘聚焦可见性（按钮）：品牌色描边，不与输入框自身 focus 光环冲突 */
+button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  outline-offset: 2px;
 }
 
 /* 强制浅色（覆盖跟随系统的深色） */
@@ -236,7 +250,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(120, 120, 128, 0.14);
+  background: var(--icon-btn);
   color: var(--text-secondary);
   cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease;
@@ -251,7 +265,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(120, 120, 128, 0.14);
+  background: var(--icon-btn);
   color: var(--text-muted);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
@@ -267,14 +281,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(120, 120, 128, 0.14);
+  background: var(--icon-btn);
   color: var(--text-muted);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }
 
 .panel-toggle:hover {
-  background: rgba(120, 120, 128, 0.24);
+  background: var(--icon-btn-hover);
   color: var(--text-secondary);
 }
 
@@ -288,7 +302,7 @@ body {
 }
 
 .notify-toggle:hover {
-  background: rgba(120, 120, 128, 0.24);
+  background: var(--icon-btn-hover);
   color: var(--text-secondary);
 }
 
@@ -303,7 +317,7 @@ body {
 }
 
 .theme-toggle:hover {
-  background: rgba(120, 120, 128, 0.24);
+  background: var(--icon-btn-hover);
 }
 
 .theme-toggle:active {
@@ -1442,7 +1456,7 @@ body.resizing {
 
 /* ---------- Input bar ---------- */
 .input-bar {
-  padding: 12px 24px 20px;
+  padding: 10px 24px 22px;
   max-width: 780px;
   margin: 0 auto;
   width: 100%;
@@ -1452,28 +1466,61 @@ body.resizing {
   flex-basis: 100%;
   display: flex;
   align-items: center;
+  margin-bottom: 8px;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
-  border-radius: var(--radius);
+  padding: 7px 12px;
+  border-radius: 10px;
   background: var(--brand-soft);
   color: var(--brand);
   font-size: 12px;
 }
 
 .edit-banner .edit-cancel {
-  padding: 2px 10px;
+  padding: 3px 12px;
   border: none;
   border-radius: 999px;
-  background: transparent;
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
   color: var(--brand);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
   box-shadow: none;
+  transition: background 0.12s ease;
 }
 
 .edit-banner .edit-cancel:hover {
-  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  background: color-mix(in srgb, var(--brand) 20%, transparent);
+}
+
+/* 输入框底部快捷键提示 */
+.composer-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  opacity: 0.72;
+  user-select: none;
+  transition: opacity 0.15s ease;
+}
+
+.composer-hint:hover {
+  opacity: 0.95;
+}
+
+.composer-hint-dot {
+  opacity: 0.5;
+}
+
+.composer-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--brand);
+  font-weight: 500;
+  opacity: 0.9;
 }
 
 .input-bar input,
@@ -1507,7 +1554,7 @@ body.resizing {
   opacity: 0.6;
 }
 
-.input-bar button {
+.input-bar > button {
   padding: 0 20px;
   border: none;
   border-radius: 10px;
@@ -1530,7 +1577,7 @@ body.resizing {
   border-radius: 10px;
 }
 
-.input-bar button:not(:disabled):hover {
+.input-bar > button:not(:disabled):hover {
   opacity: 0.85;
 }
 
@@ -1539,12 +1586,12 @@ body.resizing {
   color: #fff;
 }
 
-.input-bar button:disabled {
+.input-bar > button:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
 
-.input-bar button:not(:disabled):active {
+.input-bar > button:not(:disabled):active {
   transform: scale(0.95);
 }
 
@@ -1553,39 +1600,44 @@ body.resizing {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--surface);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .composer:focus-within {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 10%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 50%, var(--border));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--brand) 13%, transparent),
+    0 0 22px color-mix(in srgb, var(--brand) 10%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.06);
 }
 
 /* 文本输入区 */
 .composer-body {
-  padding: 10px 12px 0;
+  padding: 14px 16px 0;
 }
 
 .composer-body .chat-input {
   width: 100%;
-  min-height: 36px;
+  min-height: 24px;
   max-height: 140px;
   padding: 0;
   border: none;
   background: transparent;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
   resize: none;
   outline: none;
   font-family: inherit;
   color: var(--text);
+  caret-color: var(--brand);
 }
 
 .composer-body .chat-input::placeholder {
   color: var(--text-muted);
-  opacity: 0.6;
+  opacity: 0.75;
 }
 
 .composer-body .chat-input:focus {
@@ -1598,17 +1650,18 @@ body.resizing {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 4px 12px 0;
+  padding: 6px 16px 0;
 }
 
 .composer-attach-item {
   position: relative;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .composer-attach-item img {
@@ -1620,26 +1673,28 @@ body.resizing {
 
 .composer-attach-item button {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 14px;
-  height: 14px;
+  top: 3px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.55);
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.1s ease;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
 .composer-attach-item button:hover {
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
+  transform: scale(1.1);
 }
 
 /* 底部单行工具栏 */
@@ -1647,15 +1702,17 @@ body.resizing {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 8px 6px;
+  padding: 6px 10px 8px;
   gap: 0;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
 }
 
 .composer-toolbar-left,
 .composer-toolbar-right {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 2px;
 }
 
 /* 工具栏图标按钮 */
@@ -1663,11 +1720,11 @@ body.resizing {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -1680,44 +1737,73 @@ body.resizing {
   color: var(--text);
 }
 
-.toolbar-stop {
+.toolbar-btn:active {
+  transform: scale(0.92);
+}
+
+.input-bar button.toolbar-stop {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  padding: 0;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: var(--danger);
 }
 
-.toolbar-stop:hover {
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
+.input-bar button.toolbar-stop:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger);
 }
 
 /* 发送按钮 */
-.toolbar-send {
+.input-bar button.toolbar-send {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: none;
-  border-radius: 8px;
-  background: var(--brand);
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand), var(--brand-strong));
   color: #fff;
   cursor: pointer;
-  transition: opacity 0.12s ease, transform 0.08s ease;
+  transition: opacity 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
   flex-shrink: 0;
   margin-left: 4px;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--brand) 30%, transparent);
 }
 
-.toolbar-send:hover:not(:disabled) {
-  opacity: 0.85;
+.input-bar button.toolbar-send:hover:not(:disabled) {
+  opacity: 0.92;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--brand) 45%, transparent);
 }
 
-.toolbar-send:active:not(:disabled) {
-  transform: scale(0.92);
+.input-bar button.toolbar-send:active:not(:disabled) {
+  transform: scale(0.9);
+  box-shadow: 0 0 2px color-mix(in srgb, var(--brand) 20%, transparent);
 }
 
-.toolbar-send:disabled {
+.input-bar button.toolbar-send:disabled {
   opacity: 0.2;
   cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 输入有内容时发送按钮的轻盈入场 */
+@keyframes send-in {
+  from {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.toolbar-send.active {
+  animation: send-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* 下拉触发按钮 */
@@ -1728,11 +1814,11 @@ body.resizing {
 .toolbar-dropdown-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px 6px;
+  gap: 4px;
+  padding: 4px 8px;
   border: none;
-  border-radius: 6px;
-  background: transparent;
+  border-radius: 7px;
+  background: var(--surface-muted);
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
@@ -1744,17 +1830,28 @@ body.resizing {
 }
 
 .toolbar-dropdown-btn:hover {
-  background: var(--surface-muted);
+  background: var(--surface-filled);
   color: var(--text);
 }
 
 .toolbar-dropdown-btn.auto {
   color: var(--brand);
   font-weight: 600;
+  background: var(--brand-soft);
 }
 
 .toolbar-dropdown-btn.auto:hover {
-  background: color-mix(in srgb, var(--brand) 8%, transparent);
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+.toolbar-dropdown-btn.dangerous {
+  color: var(--danger);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.toolbar-dropdown-btn.dangerous:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
 }
 
 /* 模型按钮 */
@@ -1763,10 +1860,11 @@ body.resizing {
 }
 
 .toolbar-model-dot {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--brand);
+  background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+  box-shadow: 0 0 4px color-mix(in srgb, var(--brand) 50%, transparent);
   flex-shrink: 0;
 }
 
@@ -1794,11 +1892,11 @@ body.resizing {
   min-width: 170px;
   max-height: 240px;
   overflow: auto;
-  padding: 3px;
+  padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 .toolbar-dropdown-item {
@@ -1806,9 +1904,9 @@ body.resizing {
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 5px 8px;
+  padding: 6px 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--text);
   font-size: 12px;

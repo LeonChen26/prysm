@@ -562,9 +562,9 @@ export function ChatPanel() {
   const [modelOpen, setModelOpen] = useState(false);
   /** 输入框审批模式下拉是否展开 */
   const [approvalOpen, setApprovalOpen] = useState(false);
-  /** 审批模式：手动（默认） / 自动（到达即批准，持久化到 localStorage）。
+  /** 审批模式：手动（默认） / 自动（到达即批准） / dangerous（无任何审批，持久化到 localStorage）。
    *  注意：初始值固定 manual，挂载后再从 localStorage 读取，避免 SSR 水合不一致。 */
-  const [approvalMode, setApprovalMode] = useState<"manual" | "auto">("manual");
+  const [approvalMode, setApprovalMode] = useState<"manual" | "auto" | "dangerous">("manual");
   /** 待发送的图片附件（多模态，随消息传给 /api/agent） */
   const [pendingImages, setPendingImages] = useState<
     { id: string; dataUrl: string; mimeType: string; name: string }[]
@@ -1488,6 +1488,7 @@ export function ChatPanel() {
             message: t,
             sessionId: overrideSessionId === undefined ? sessionId : overrideSessionId,
             rewindToText,
+            approvalMode,
             ...(images && images.length > 0 ? { images } : {}),
           }),
         });
@@ -1677,7 +1678,7 @@ export function ChatPanel() {
         refreshStats();
       }
     },
-    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion, notifyApproval, showNotice, applyApprovalToCard],
+    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion, notifyApproval, showNotice, applyApprovalToCard, approvalMode],
   );
 
   /** 新建会话（携带当前 surface 形态；preset 可选：创建后立即以该提示词发起任务） */
@@ -2097,24 +2098,24 @@ export function ChatPanel() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem("prysm.approvalMode");
-      if (saved === "auto" || saved === "manual") setApprovalMode(saved);
+      if (saved === "auto" || saved === "manual" || saved === "dangerous") setApprovalMode(saved);
     } catch {
       /* 忽略 */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** 自动审批：审批请求到达即批准 */
+  /** 自动/危险审批：审批请求到达即批准 */
   useEffect(() => {
-    if (approvalMode !== "auto") return;
+    if (approvalMode !== "auto" && approvalMode !== "dangerous") return;
     approvals.forEach((item) => {
       if (!item.deciding) void decideApproval(item.id, true);
     });
   }, [approvalMode, approvals, decideApproval]);
 
-  /** 自动审批：计划提案到达即批准执行 */
+  /** 自动/危险审批：计划提案到达即批准执行 */
   useEffect(() => {
-    if (approvalMode !== "auto") return;
+    if (approvalMode !== "auto" && approvalMode !== "dangerous") return;
     plans.forEach((p) => {
       if (!p.deciding && typeof p.decided !== "boolean" && !p.cancelled) {
         void decidePlan(p.id, true);
@@ -3480,7 +3481,7 @@ export function ChatPanel() {
                       }
                     }
                   }}
-                  placeholder="描述任务…（/help 查看命令，Enter 发送）"
+                  placeholder="描述任务…（/help 查看命令）"
                   disabled={busy}
                   rows={1}
                 />
@@ -3509,14 +3510,22 @@ export function ChatPanel() {
                   <div className="toolbar-dropdown">
                     <button
                       type="button"
-                      className={`toolbar-dropdown-btn${approvalMode === "auto" ? " auto" : ""}`}
+                      className={`toolbar-dropdown-btn${approvalMode === "auto" ? " auto" : ""}${approvalMode === "dangerous" ? " dangerous" : ""}`}
                       onClick={() => setApprovalOpen((v) => !v)}
-                      title={approvalMode === "auto" ? "自动审批" : "手动审批"}
+                      title={approvalMode === "auto" ? "自动审批" : approvalMode === "dangerous" ? "危险模式（无审批）" : "手动审批"}
                     >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                      </svg>
-                      <span>{approvalMode === "auto" ? "自动审批" : "手动审批"}</span>
+                      {approvalMode === "dangerous" ? (
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 9v4" />
+                          <path d="M12 17h.01" />
+                          <path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                        </svg>
+                      ) : (
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                      )}
+                      <span>{approvalMode === "auto" ? "自动审批" : approvalMode === "dangerous" ? "危险模式" : "手动审批"}</span>
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M6 9l6 6 6-6" />
                       </svg>
@@ -3546,6 +3555,19 @@ export function ChatPanel() {
                             </svg>
                             自动审批
                             <span className="toolbar-dropdown-hint">到达即批准</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`toolbar-dropdown-item${approvalMode === "dangerous" ? " active" : ""}`}
+                            onClick={() => { setApprovalMode("dangerous"); setApprovalOpen(false); }}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 9v4" />
+                              <path d="M12 17h.01" />
+                              <path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                            </svg>
+                            危险模式
+                            <span className="toolbar-dropdown-hint">无需任何审批</span>
                           </button>
                         </div>
                       </>
@@ -3630,7 +3652,7 @@ export function ChatPanel() {
                   ) : (
                     <button
                       type="submit"
-                      className="toolbar-send"
+                      className={`toolbar-send${input.trim() ? " active" : ""}`}
                       disabled={!input.trim()}
                       aria-label="发送"
                     >
@@ -3652,6 +3674,17 @@ export function ChatPanel() {
                   e.target.value = "";
                 }}
               />
+            </div>
+            <div className="composer-hint">
+              <span>Enter 发送</span>
+              <span className="composer-hint-dot">·</span>
+              <span>Shift+Enter 换行</span>
+              {input.length > 0 && (
+                <>
+                  <span className="composer-hint-dot">·</span>
+                  <span className="composer-count">{input.length} 字符</span>
+                </>
+              )}
             </div>
           </form>
         </section>
