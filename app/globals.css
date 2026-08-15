@@ -3090,6 +3090,22 @@ body.resizing {
   fill: var(--warning);
 }
 
+.insights-trend-axis {
+  position: relative;
+  height: 13px;
+  margin-top: 2px;
+}
+
+.insights-trend-axis-label {
+  position: absolute;
+  bottom: 0;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- 模型表现（评估面板：按模型聚合 AI 均分/低分/规则问题） ---------- */
 .insights-models {
   margin-top: 10px;

@@ -86,7 +86,37 @@ function CardResultView({ result }: { result: string }) {
   );
 }
 
-/** AI 评分迷你趋势图（评估面板）：按运行时间序画折线，7 分以下为低分点 */
+/** 时间轴标签格式：跨天用 MM-DD，同日用 HH:MM（迷你图紧凑显示） */
+function formatAxisTime(at: number, multiDay: boolean): string {
+  const d = new Date(at);
+  const p = (v: number) => String(v).padStart(2, "0");
+  return multiDay
+    ? `${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    : `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 同一自然日判断（用于决定轴标签用日期还是时刻） */
+function isSameLocalDay(a: number, b: number): boolean {
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+/** 均匀采样至多 MAX 个下标（始终含首尾），避免轴标签拥挤 */
+function sampleAxisIdx(n: number, max = 4): number[] {
+  if (n <= max) return Array.from({ length: n }, (_, i) => i);
+  const idxs = new Set<number>([0, n - 1]);
+  for (let i = 1; i < max - 1; i++) {
+    idxs.add(Math.round((i / (max - 1)) * (n - 1)));
+  }
+  return [...idxs].sort((a, b) => a - b);
+}
+
+/** AI 评分迷你趋势图（评估面板）：按运行时间序画折线，7 分以下为低分点，底部对齐时间轴标签 */
 function JudgeTrendChart({ trend }: { trend: JudgeTrendPoint[] }) {
   if (trend.length < 1) return null;
   const W = 100;
@@ -99,6 +129,8 @@ function JudgeTrendChart({ trend }: { trend: JudgeTrendPoint[] }) {
   const pts = trend
     .map((p, i) => `${x(i).toFixed(1)},${y(p.score).toFixed(1)}`)
     .join(" ");
+  const multiDay = !isSameLocalDay(trend[0].at, trend[n - 1].at);
+  const axisIdx = sampleAxisIdx(n);
   return (
     <div className="insights-trend">
       <div className="insights-trend-head">
@@ -126,10 +158,34 @@ function JudgeTrendChart({ trend }: { trend: JudgeTrendPoint[] }) {
             r="1.8"
             className={`insights-trend-dot ${p.score < 7 ? "low" : "ok"}`}
           >
-            <title>{`${p.score}/10`}</title>
+            <title>{`${p.score}/10 · ${formatAxisTime(p.at, multiDay)}`}</title>
           </circle>
         ))}
       </svg>
+      <div className="insights-trend-axis">
+        {axisIdx.map((i) => {
+          const pct = (x(i) / W) * 100;
+          const style =
+            i === 0
+              ? { left: `${pct}%`, textAlign: "left" as const }
+              : i === n - 1
+                ? { left: `${pct}%`, textAlign: "right" as const }
+                : {
+                    left: `${pct}%`,
+                    textAlign: "center" as const,
+                    transform: "translateX(-50%)",
+                  };
+          return (
+            <span
+              key={i}
+              className="insights-trend-axis-label"
+              style={style}
+            >
+              {formatAxisTime(trend[i].at, multiDay)}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }
