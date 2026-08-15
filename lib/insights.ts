@@ -244,12 +244,30 @@ export interface JudgeTrendPoint {
   at: number;
 }
 
-/** 观测 + 评估聚合：运行记录（附带各自评分）+ 汇总统计 + 优化建议 + 评分趋势 */
+/** 按模型聚合的评估统计（评估 + 分析：哪类模型表现更好、问题更少） */
+export interface ModelStat {
+  model: string;
+  /** 该模型运行次数 */
+  runs: number;
+  /** 有 LLM-Judge 评分的运行数 */
+  judgeCount: number;
+  /** LLM-Judge 平均分（0-10，一位小数；无评分时为 null） */
+  avgJudgeScore: number | null;
+  /** 低分（<7）次数 */
+  lowScoreCount: number;
+  /** 规则问题次数（run_error/run_stopped/no_tools） */
+  ruleIssues: number;
+  /** 总 token 用量 */
+  totalTokens: number;
+}
+
+/** 观测 + 评估聚合：运行记录（附带各自评分）+ 汇总统计 + 优化建议 + 评分趋势 + 模型表现 */
 export function getInsightsOverview(runLimit = 100): {
   runs: (RunLogEntry & { scores: Score[] })[];
   summary: InsightsSummary;
   suggestions: OptimizationSuggestion[];
   judgeTrend: JudgeTrendPoint[];
+  modelStats: ModelStat[];
 } {
   const d = getDb();
   const count = (sql: string): number => {
@@ -319,6 +337,46 @@ export function getInsightsOverview(runLimit = 100): {
       .all() as { score: number; at: number }[]
   ).map((r) => ({ score: Number(r.score), at: Number(r.at) }));
 
+  // 模型表现：按 turns.model 聚合（1:1 关联 llm_judge / 规则评分，避免笛卡尔积）
+  const modelStats: ModelStat[] = (
+    d
+      .prepare(
+        `SELECT t.model AS model,
+                COUNT(*) AS runs,
+                COUNT(s.id) AS judge_count,
+                AVG(s.score) AS avg_score,
+                SUM(CASE WHEN s.score IS NOT NULL AND s.score < 7 THEN 1 ELSE 0 END) AS low_count,
+                COUNT(r.id) AS rule_issues,
+                COALESCE(SUM(t.tokens_total), 0) AS total_tokens
+         FROM turns t
+         LEFT JOIN scores s ON s.run_id = t.id AND s.kind = 'rule' AND s.label = 'llm_judge' AND s.score IS NOT NULL
+         LEFT JOIN scores r ON r.run_id = t.id AND r.kind = 'rule' AND r.label IN ('run_error', 'run_stopped', 'no_tools')
+         WHERE t.model IS NOT NULL AND t.model != ''
+         GROUP BY t.model
+         ORDER BY runs DESC`,
+      )
+      .all() as {
+      model: string;
+      runs: number;
+      judge_count: number;
+      avg_score: number | null;
+      low_count: number;
+      rule_issues: number;
+      total_tokens: number;
+    }[]
+  ).map((r) => ({
+    model: r.model,
+    runs: Number(r.runs),
+    judgeCount: Number(r.judge_count),
+    avgJudgeScore:
+      r.avg_score == null
+        ? null
+        : Math.round(Number(r.avg_score) * 10) / 10,
+    lowScoreCount: Number(r.low_count),
+    ruleIssues: Number(r.rule_issues),
+    totalTokens: Number(r.total_tokens),
+  }));
+
   const scores = listScores();
   const byRun = new Map<number, Score[]>();
   for (const s of scores) {
@@ -353,5 +411,6 @@ export function getInsightsOverview(runLimit = 100): {
     },
     suggestions,
     judgeTrend,
+    modelStats,
   };
 }

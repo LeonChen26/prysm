@@ -552,6 +552,83 @@ freshDb();
   expectEq("无评分时趋势为空", getInsightsOverview().judgeTrend.length, 0);
 }
 
+// ---------- 10. getInsightsOverview：按模型聚合（模型表现） ----------
+console.log("\n== getInsightsOverview：按模型聚合统计 ==");
+freshDb();
+{
+  // model-a：2 次运行、2 条 LLM-Judge 评分（5 低分 + 9）、1 次 run_error
+  recordRun({
+    sessionId: "sess-m-a1",
+    title: "A1",
+    startedAt: 1,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+    error: "超时",
+    model: "model-a",
+    usage: { input: 100, output: 50, cacheRead: 0, totalTokens: 150, cost: 0.01 },
+  });
+  recordRun({
+    sessionId: "sess-m-a2",
+    title: "A2",
+    startedAt: 2,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+    toolCalls: { write_file: 1 },
+    model: "model-a",
+    usage: { input: 200, output: 100, cacheRead: 0, totalTokens: 300, cost: 0.02 },
+  });
+  const a1 = getRuns(10).find((r) => r.sessionId === "sess-m-a1")!.id;
+  const a2 = getRuns(10).find((r) => r.sessionId === "sess-m-a2")!.id;
+  addScore({ sessionId: "sess-m-a1", runId: a1, kind: "rule", label: "llm_judge", score: 5 });
+  addScore({ sessionId: "sess-m-a2", runId: a2, kind: "rule", label: "llm_judge", score: 9 });
+
+  // model-b：1 次运行、无 LLM-Judge 评分，但触发 no_tools 规则问题
+  recordRun({
+    sessionId: "sess-m-b1",
+    title: "B1",
+    startedAt: 3,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+    model: "model-b",
+    usage: { input: 10, output: 5, cacheRead: 0, totalTokens: 15, cost: 0.001 },
+  });
+
+  // 无 model 的运行不计入模型统计
+  recordRun({
+    sessionId: "sess-m-null",
+    title: "无模型",
+    startedAt: 4,
+    durationMs: 1,
+    messageCount: 1,
+    stopped: false,
+  });
+
+  const ov = getInsightsOverview();
+  expectEq("模型列表长度（无 model 不统计）", ov.modelStats.length, 2);
+  expectEq(
+    "模型顺序按运行次数降序",
+    ov.modelStats.map((m) => m.model),
+    ["model-a", "model-b"],
+  );
+  const a = ov.modelStats[0];
+  expectEq("model-a 运行次数", a.runs, 2);
+  expectEq("model-a judgeCount", a.judgeCount, 2);
+  expectEq("model-a avgJudgeScore=(5+9)/2", a.avgJudgeScore, 7);
+  expectEq("model-a lowScoreCount（5<7）", a.lowScoreCount, 1);
+  expectEq("model-a ruleIssues（run_error）", a.ruleIssues, 1);
+  expectEq("model-a totalTokens 聚合", a.totalTokens, 450);
+  const b = ov.modelStats[1];
+  expectEq("model-b 运行次数", b.runs, 1);
+  expectEq("model-b judgeCount 为 0", b.judgeCount, 0);
+  expectEq("model-b avgJudgeScore 为 null", b.avgJudgeScore, null);
+  expectEq("model-b lowScoreCount 为 0", b.lowScoreCount, 0);
+  expectEq("model-b ruleIssues（no_tools）", b.ruleIssues, 1);
+  expectEq("model-b totalTokens 聚合", b.totalTokens, 15);
+}
+
 // ---------- 清理 ----------
 clearRuns();
 resetConfig();

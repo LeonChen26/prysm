@@ -86,6 +86,8 @@ export const SYSTEM_PROMPT = buildSystemPrompt(getAllowedRoots());
 
 /** 按会话缓存 Agent 实例：切换会话即切换实例，历史消息在构造时恢复 */
 const agentPool = new Map<string, Agent>();
+/** 会话 → 实际解析的主模型（getAgent 创建时记录，供 logRun 落库模型维度） */
+const agentModels = new Map<string, string>();
 /** 记录被用户主动停止的会话（run 结束后由路由消费） */
 const stoppedSessions = new Set<string>();
 
@@ -187,11 +189,20 @@ export interface RunLogEntry {
   };
 }
 
+/** 会话对应的主模型（未创建/未记录时为 undefined） */
+export function getAgentModel(sessionId: string): string | undefined {
+  return agentModels.get(sessionId);
+}
+
 /** 记录一次 Agent 运行（持久化到 insights.db，替代内存数组），返回落库记录（含 id，供关联评分） */
 export function logRun(
   entry: Omit<RunLogEntry, "id"> & { userText?: string; model?: string },
 ): RunLogEntry {
-  return recordRun(entry);
+  // 未显式传 model 时，用该会话实际解析的主模型补齐（供模型维度统计）
+  return recordRun({
+    ...entry,
+    model: entry.model ?? getAgentModel(entry.sessionId),
+  });
 }
 
 /** 最近运行日志（新在前，从 insights.db 读） */
@@ -333,6 +344,7 @@ export async function getAgent(sessionId: string): Promise<Agent> {
       `模型 "${modelId}" 在提供商 "${provider}" 中不存在。可用 "MODEL_ID" 环境变量指定。`,
     );
   }
+  agentModels.set(sessionId, modelId);
   const auth = await models.checkAuth(provider);
   if (!auth) {
     throw new Error(
@@ -371,6 +383,7 @@ export async function getAgent(sessionId: string): Promise<Agent> {
 export function resetAgent(): void {
   for (const a of agentPool.values()) a.reset();
   agentPool.clear();
+  agentModels.clear();
   resetModelRouter();
   resetMemoryTracking();
 }

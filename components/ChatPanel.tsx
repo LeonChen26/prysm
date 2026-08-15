@@ -58,6 +58,7 @@ import {
   type ContextAnalysis,
   type InsightsOverview,
   type JudgeTrendPoint,
+  type ModelStat,
 } from "./chat-types";
 
 /** Markdown 渲染组件集：表格加边框类、图片懒加载+加载失败占位、链接新标签打开 */
@@ -129,6 +130,64 @@ function JudgeTrendChart({ trend }: { trend: JudgeTrendPoint[] }) {
           </circle>
         ))}
       </svg>
+    </div>
+  );
+}
+
+/** 模型表现（评估面板）：按运行次数排序，展示各模型 AI 均分 / 低分 / 规则问题 */
+function ModelStatsView({ stats }: { stats: ModelStat[] }) {
+  if (stats.length === 0) return null;
+  return (
+    <div className="insights-models">
+      <div className="insights-models-head">
+        <span className="insights-models-title">模型表现</span>
+        <span className="insights-models-hint">按运行次数排序</span>
+      </div>
+      {stats.map((m) => {
+        const hasScore = m.avgJudgeScore != null;
+        const pct = hasScore
+          ? Math.max(0, Math.min(100, (m.avgJudgeScore! / 10) * 100))
+          : 0;
+        return (
+          <div className="insights-model" key={m.model}>
+            <div className="insights-model-top">
+              <span className="insights-model-name" title={m.model}>
+                {m.model}
+              </span>
+              <div className="insights-model-meta">
+                <span className="insights-model-runs">{m.runs} 次</span>
+                {hasScore && (
+                  <span
+                    className={`insights-model-score ${
+                      m.avgJudgeScore! < 7 ? "low" : ""
+                    }`}
+                  >
+                    {m.avgJudgeScore}
+                  </span>
+                )}
+                {m.lowScoreCount > 0 && (
+                  <span className="insights-model-flag low">
+                    低分 {m.lowScoreCount}
+                  </span>
+                )}
+                {m.ruleIssues > 0 && (
+                  <span className="insights-model-flag issue">
+                    问题 {m.ruleIssues}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="insights-model-bar">
+              <div
+                className={`insights-model-bar-fill ${
+                  hasScore ? "" : "empty"
+                }`}
+                style={hasScore ? { width: `${pct}%` } : undefined}
+              />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -3841,6 +3900,8 @@ export function ChatPanel() {
                     </div>
 
                     <JudgeTrendChart trend={insights.judgeTrend} />
+
+                    <ModelStatsView stats={insights.modelStats} />
 
                     {insights.suggestions.length > 0 && (
                       <div className="insights-suggest">

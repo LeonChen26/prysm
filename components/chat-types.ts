@@ -408,12 +408,30 @@ export interface JudgeTrendPoint {
   at: number;
 }
 
+/** 按模型聚合的评估统计（评估 + 分析：哪类模型表现更好、问题更少） */
+export interface ModelStat {
+  model: string;
+  /** 该模型运行次数 */
+  runs: number;
+  /** 有 LLM-Judge 评分的运行数 */
+  judgeCount: number;
+  /** LLM-Judge 平均分（0-10，一位小数；无评分时为 null） */
+  avgJudgeScore: number | null;
+  /** 低分（<7）次数 */
+  lowScoreCount: number;
+  /** 规则问题次数（run_error/run_stopped/no_tools） */
+  ruleIssues: number;
+  /** 总 token 用量 */
+  totalTokens: number;
+}
+
 /** GET /api/insights 返回的观测 + 评估聚合 */
 export interface InsightsOverview {
   runs: InsightRun[];
   summary: InsightsSummary;
   suggestions: OptimizationSuggestion[];
   judgeTrend: JudgeTrendPoint[];
+  modelStats: ModelStat[];
 }
 
 export const GROUP_ORDER = ["今天", "昨天", "7天内", "更早"];
