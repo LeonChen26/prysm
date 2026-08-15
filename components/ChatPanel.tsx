@@ -19,12 +19,20 @@ import { mdToPlainText } from "@/lib/plaintext";
 import { TOOL_META } from "@/lib/tool-meta";
 import { DiffView, isDiffText } from "./DiffView";
 import {
+  BracesIcon,
   CodeBlock,
+  DownloadIcon,
   extractFileRefs,
+  FileDownIcon,
   FileRefCards,
+  PencilIcon,
   PersonIcon,
+  PinIcon,
+  PinOffIcon,
   PrismIcon,
   SparkleIcon,
+  TrashIcon,
+  UploadIcon,
   WbChevron,
   WbFileIcon,
   WbFolderIcon,
@@ -2692,7 +2700,9 @@ export function ChatPanel() {
                                   )}
                                   <span className="session-item-title">
                                     {s.pinned === 1 && (
-                                      <span className="session-pin-badge" title="已置顶">📌</span>
+                                      <span className="session-pin-badge" title="已置顶">
+                                        <PinIcon size={12} />
+                                      </span>
                                     )}
                                     {s.title || "未命名会话"}
                                   </span>
@@ -2710,7 +2720,7 @@ export function ChatPanel() {
                                           togglePin(s.id);
                                         }}
                                       >
-                                        {s.pinned === 1 ? "🔓" : "📌"}
+                                        {s.pinned === 1 ? <PinOffIcon /> : <PinIcon />}
                                       </span>
                                       <span
                                         className="session-item-act"
@@ -2721,7 +2731,7 @@ export function ChatPanel() {
                                           exportSession(s.id, "md");
                                         }}
                                       >
-                                        ⬇
+                                        <FileDownIcon />
                                       </span>
                                       <span
                                         className="session-item-act"
@@ -2732,7 +2742,7 @@ export function ChatPanel() {
                                           exportSession(s.id, "json");
                                         }}
                                       >
-                                        ⚙
+                                        <BracesIcon />
                                       </span>
                                       <span
                                         className="session-item-act"
@@ -2743,7 +2753,7 @@ export function ChatPanel() {
                                           clearSession(s.id);
                                         }}
                                       >
-                                        ∅
+                                        <TrashIcon />
                                       </span>
                                       <span
                                         className="session-item-act"
@@ -2754,7 +2764,7 @@ export function ChatPanel() {
                                           startRename(s.id, s.title || "");
                                         }}
                                       >
-                                        ✎
+                                        <PencilIcon />
                                       </span>
                                       <span
                                         className="session-item-act session-item-del"
@@ -2791,7 +2801,7 @@ export function ChatPanel() {
                 <span className="session-title">文件</span>
                 <div className="session-head-actions">
                   <label className="session-new" title="上传文件到工作区">
-                    ⬆
+                    <UploadIcon size={14} />
                     <input
                       type="file"
                       hidden
