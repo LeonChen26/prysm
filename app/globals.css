@@ -856,9 +856,11 @@ body.resizing {
 }
 
 .session-pin-badge {
+  display: inline-flex;
+  align-items: center;
   margin-right: 4px;
-  font-size: 12px;
-  vertical-align: -1px;
+  vertical-align: -2px;
+  color: var(--brand);
 }
 
 .session-rename-input {
