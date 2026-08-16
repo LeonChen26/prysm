@@ -27,7 +27,8 @@ function escapeRegex(s: string): string {
 function parsePathRules(items: string[]): PathRule[] {
   const rules: PathRule[] = [];
   for (const item of items) {
-    const rule = item.replace(/^\.?\//, "").trim();
+    // 反斜杠归一化：Windows 绝对路径（C:\...）与待匹配路径（normPath 已转 /）保持分隔符一致
+    const rule = item.replace(/^\.?\//, "").trim().replace(/\\/g, "/");
     if (!rule) continue;
     if (rule.includes("*")) {
       // 通配规则只匹配文件名（最后一段）

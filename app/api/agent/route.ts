@@ -2,7 +2,7 @@ import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { consumeStopped, generateTitle, logRun, setApprovalMode } from "@/lib/agent";
 import { judgeRun } from "@/lib/judge";
-import { setMemoryCtx, setPlanCtx, runWithWorkdir } from "@/lib/tools";
+import { runWithToolCtx, runWithWorkdir } from "@/lib/tools";
 import { rememberMessages } from "@/lib/memory";
 import { createCore } from "@/lib/core";
 import { toImageContents, extractImages } from "@/lib/attachments";
@@ -31,13 +31,20 @@ function toUiMessage(m: AgentMessage) {
   return null;
 }
 
-/** 解析请求中的会话：显式指定且存在则用之，否则取最新会话，无则新建 */
-function resolveSession(body: { sessionId?: unknown }): SessionInfo {
+/** 解析请求中的会话：显式指定且存在则用之，否则取当前 surface 下最新会话，无则新建 */
+function resolveSession(body: { sessionId?: unknown; surface?: unknown }): SessionInfo {
   if (typeof body.sessionId === "string" && body.sessionId) {
     const s = getSession(body.sessionId);
     if (s) return s;
   }
-  return core.listSessions()[0] ?? core.createSession();
+  const surface = body.surface === "work" || body.surface === "coding" ? body.surface : undefined;
+  const list = core.listSessions();
+  // 优先取同 surface 的最新会话，避免无会话时消息串到另一种形态（修复前取全局最新）
+  if (surface) {
+    const match = list.find((s) => (s.surface ?? "coding") === surface);
+    if (match) return match;
+  }
+  return list[0] ?? core.createSession(surface ? { surface } : undefined);
 }
 
 /** GET /api/agent?sessionId=xxx —— 返回指定会话（默认最新）的消息历史 */
@@ -178,7 +185,9 @@ export async function POST(req: Request) {
       const usage = { input: 0, output: 0, cacheRead: 0, totalTokens: 0, cost: 0 };
       const unsubBus = core.eventBus.subscribe((event) => {
         const sid = (event as { sessionId?: string }).sessionId;
-        if (sid && sid !== session.id) return;
+        // 按会话隔离：精确匹配当前会话；子 agent 事件 sessionId 为 `${sessionId}:${subagentId}`，
+        // 前缀匹配放行（修复前子 agent 审批事件被丢弃，审批卡到超时自动拒绝）
+        if (sid && sid !== session.id && !sid.startsWith(session.id + ":")) return;
         const type = (event as { type?: string }).type;
         if (type === "tool_end") {
           const name = (event as { toolName?: string }).toolName;
@@ -208,17 +217,23 @@ export async function POST(req: Request) {
       let aborted = false;
       let runError: unknown = undefined;
       const runStartedAt = Date.now();
-      // 注入 plan_propose 会话上下文（本轮 prompt 期间有效）
-      setPlanCtx({ sessionId: session.id, surface: session.surface ?? "coding" });
-      setMemoryCtx({ workdir: session.workdir });
-      // 在会话绑定工作目录上下文中执行 prompt + 工具调用链；
-      // 使用 AsyncLocalStorage 保证并发请求各自读到自己的工作目录，
-      // 不会因全局变量被其他请求覆盖而在错误的 workdir 下操作文件。
+      // 在「工具会话上下文 + 会话绑定工作目录」下执行 prompt + 工具调用链；
+      // 使用 AsyncLocalStorage 保证并发请求各自读到自己的 sessionId/workdir，
+      // 不会因全局变量被其他请求覆盖（plan_propose 归属 / 记忆归属 / 工作目录）。
       try {
-        await runWithWorkdir(session.workdir, async () => {
-          await a.prompt(message, imageContents.length > 0 ? imageContents : undefined);
-          await a.waitForIdle();
-        });
+        await runWithToolCtx(
+          {
+            sessionId: session.id,
+            surface: session.surface ?? "coding",
+            workdir: session.workdir,
+          },
+          async () => {
+            await runWithWorkdir(session.workdir, async () => {
+              await a.prompt(message, imageContents.length > 0 ? imageContents : undefined);
+              await a.waitForIdle();
+            });
+          },
+        );
       } catch (err) {
         runError = err;
         // 用户通过 /api/agent/stop 中止：区分"主动停止"与"真实错误"
@@ -307,8 +322,6 @@ export async function POST(req: Request) {
           console.error("[memory] 写入失败:", err);
         }
         unsubBus();
-        setPlanCtx(undefined);
-        setMemoryCtx(undefined);
         send(
           stopped
             ? { type: "stopped", message: "任务已停止" }

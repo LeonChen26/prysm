@@ -53,6 +53,8 @@ interface PendingEntry {
   resolver: ApproveResolver;
   createdAt: number;
   expiresAt: number;
+  /** 超时定时器：resolveApproval 时需 clearTimeout，避免批准后仍触发 timeout 审计/过期事件 */
+  timer: ReturnType<typeof setTimeout>;
 }
 
 const pending = new Map<string, PendingEntry>();
@@ -100,6 +102,8 @@ export function requestApproval(
       expiresAt,
     };
     const timer = setTimeout(() => {
+      // entry 已被 resolveApproval 移除（用户已决定）或同 id 已被新请求覆盖时，跳过过期处理
+      if (pending.get(req.id)?.timer !== timer) return;
       pending.delete(req.id);
       logApproval(req.toolName, req.args, "timeout", {
         sessionId: req.sessionId,
@@ -109,7 +113,7 @@ export function requestApproval(
       notifyLifecycle({ type: "expired", state });
       resolve(false);
     }, effectiveTimeout);
-    pending.set(req.id, { req, resolver: resolve, createdAt, expiresAt });
+    pending.set(req.id, { req, resolver: resolve, createdAt, expiresAt, timer });
     notifyLifecycle({ type: "required", state });
   });
 }
@@ -119,6 +123,7 @@ export function resolveApproval(id: string, approve: boolean): boolean {
   const entry = pending.get(id);
   if (!entry) return false;
   pending.delete(id);
+  clearTimeout(entry.timer); // 取消超时定时器，防止已决后再写 timeout 审计/推 expired
   const state: ApprovalState = {
     ...entry.req,
     status: approve ? "approved" : "denied",

@@ -62,8 +62,15 @@ export async function POST(req: Request) {
       }
     }
     if (action === "delete") {
-      if (!deleteSkill(name, skillRoot(resolveScope(body?.scope)))) {
-        return Response.json({ error: `技能 ${name} 不存在` }, { status: 404 });
+      try {
+        if (!deleteSkill(name, skillRoot(resolveScope(body?.scope)))) {
+          return Response.json({ error: `技能 ${name} 不存在` }, { status: 404 });
+        }
+      } catch (err) {
+        return Response.json(
+          { error: err instanceof Error ? err.message : String(err) },
+          { status: 400 },
+        );
       }
       return Response.json({ ok: true, name, deleted: true });
     }

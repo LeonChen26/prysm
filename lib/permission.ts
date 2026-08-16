@@ -288,13 +288,22 @@ export function setActiveMode(mode: PermissionMode): void {
   }
 }
 
-/** 当前生效的权限配置（custom 模式读 customProfiles.default） */
+/**
+ * 当前生效的权限配置（custom 模式读 customProfiles.default）。
+ * 返回深拷贝：preset 为模块级共享常量，调用方若直接持有引用并修改字段
+ * 会污染全局（且 reloadPermission 无法清除），故每次返回独立副本。
+ */
 export function getActiveProfile(): PermissionProfile {
   const perm = getPermission();
-  if (perm.activeMode === "manual") return PRESET_MANUAL;
-  if (perm.activeMode === "auto") return PRESET_AUTO;
-  if (perm.activeMode === "full") return PRESET_FULL;
-  return perm.customProfiles.default ?? PRESET_MANUAL;
+  const src =
+    perm.activeMode === "manual"
+      ? PRESET_MANUAL
+      : perm.activeMode === "auto"
+        ? PRESET_AUTO
+        : perm.activeMode === "full"
+          ? PRESET_FULL
+          : perm.customProfiles.default ?? PRESET_MANUAL;
+  return structuredClone(src);
 }
 
 /** 当前决策方 */

@@ -53,6 +53,7 @@ export interface SubagentRecord {
 
 const pool = new Map<string, SubagentRecord>();
 let running = 0;
+let aborted = new Set<string>(); // 已通过 abortSubagent 释放过槽位的 key，防止 finally 双重释放
 const MAX_CONCURRENCY = 3;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -79,6 +80,8 @@ export function abortSubagent(key: string): boolean {
   if (!r || r.status !== "running") return false;
   r.status = "cancelled";
   r.summary = "(已取消)";
+  // 标记该 key 已释放槽位；runner finally 的 releaseSlot 会跳过，防止双重释放并发计数
+  aborted.add(key);
   running = Math.max(0, running - 1);
   return true;
 }
@@ -87,6 +90,7 @@ export function abortSubagent(key: string): boolean {
 export function resetSubagentPool(): void {
   pool.clear();
   running = 0;
+  aborted.clear();
 }
 
 /** 申请并发槽位（超限返回 false） */
@@ -159,7 +163,8 @@ export async function spawnSubagent(
       }
     }
   } finally {
-    releaseSlot();
+    // abortSubagent 已提前释放过槽位时跳过，避免并发计数被双重递减
+    if (!aborted.delete(key)) releaseSlot();
   }
   return rec;
 }

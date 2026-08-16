@@ -1,3 +1,4 @@
+import { getAgentForSession } from "@/lib/agent";
 import { clearSessionMessages, getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -15,6 +16,9 @@ export async function POST(
       return Response.json({ error: "会话不存在" }, { status: 404 });
     }
     clearSessionMessages(id);
+    // 同步内存中的 Agent 实例状态，避免清空后新消息仍把旧历史注入模型上下文
+    const agent = getAgentForSession(id);
+    if (agent) agent.state.messages = [];
     return Response.json({ ok: true });
   } catch (err) {
     return Response.json(

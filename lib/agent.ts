@@ -428,11 +428,31 @@ function makeBeforeToolCall(
   };
 }
 
+/**
+ * in-flight 去重：同一会话并发请求时只创建一次 Agent 实例。
+ * 修复前无锁，并发首请求会各自 new Agent()（后者覆盖前者），
+ * 导致事件双发（文本重复拼接）与消息互相覆盖。
+ */
+const pendingAgents = new Map<string, Promise<Agent>>();
+
 /** 获取指定会话的 Agent（不存在则用历史消息新建，实现会话恢复） */
 export async function getAgent(sessionId: string): Promise<Agent> {
   const existing = agentPool.get(sessionId);
   if (existing) return existing;
+  const inflight = pendingAgents.get(sessionId);
+  if (inflight) return inflight;
 
+  const creating = createAgent(sessionId);
+  pendingAgents.set(sessionId, creating);
+  try {
+    return await creating;
+  } finally {
+    pendingAgents.delete(sessionId);
+  }
+}
+
+/** 实际创建 Agent 实例（不直接缓存，由 getAgent 统一管理 in-flight 去重） */
+async function createAgent(sessionId: string): Promise<Agent> {
   const { models, model, provider, modelId } = await resolveModel("orchestrator");
   if (!model) {
     throw new Error(

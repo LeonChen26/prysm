@@ -299,11 +299,16 @@ export function createSkill(
 
 /** 删除 Skill（界面可视化删除）：删除 skills/<name> 目录并取消登记。不存在返回 false。 */
 export function deleteSkill(name: string, dir?: string): boolean {
+  const trimmed = name.trim();
+  // 与 createSkill 同一名称白名单，防路径穿越（../ 等递归删除任意目录）
+  if (!SKILL_NAME_RE.test(trimmed)) {
+    throw new Error("Skill 名称非法：仅允许字母/数字/下划线/连字符");
+  }
   const root = dir ?? getConfig().skillsDir ?? basePath("skills");
-  const skillDir = path.join(root, name);
+  const skillDir = path.join(root, trimmed);
   if (!fs.existsSync(skillDir)) return false;
   fs.rmSync(skillDir, { recursive: true, force: true });
-  enabled.delete(name);
+  enabled.delete(trimmed);
   reloadSkills(dir);
   return true;
 }

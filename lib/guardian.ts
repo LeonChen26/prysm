@@ -92,18 +92,26 @@ export async function guardianAssess(
 
   let reply;
   try {
-    reply = await models.completeSimple(model, {
-      systemPrompt: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: transcript }],
-          timestamp: Date.now(),
-        },
-      ],
-    });
+    // 带超时的决策调用：模型挂起/限流时回退用户审批，避免 beforeToolCall 永久阻塞
+    reply = await Promise.race([
+      models.completeSimple(model, {
+        systemPrompt: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: transcript }],
+            timestamp: Date.now(),
+          },
+        ],
+      }),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 15_000)),
+    ]);
   } catch (err) {
     console.warn("[guardian] 决策调用失败，回退用户审批:", err);
+    return undefined;
+  }
+  if (reply === undefined) {
+    console.warn("[guardian] 决策超时（15s），回退用户审批");
     return undefined;
   }
 

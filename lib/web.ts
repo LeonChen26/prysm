@@ -10,6 +10,8 @@
  */
 
 import { envValue } from "./config";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 export interface SearchResult {
   title: string;
@@ -35,6 +37,81 @@ async function fetchText(url: string, timeoutMs: number): Promise<string> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   return res.text();
+}
+
+/**
+ * SSRF 防护：判断 IP 是否为内网/环回/链路本地/保留地址。
+ * 联网抓取工具只能访问公网地址，防止借 fetch 探测内网与云元数据服务。
+ */
+function isBlockedIp(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  // IPv4-mapped IPv6（::ffff:1.2.3.4）取内嵌 IPv4 判断
+  const v4mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4mapped) return isBlockedIp(v4mapped[1]);
+
+  if (isIP(ip) === 4) {
+    const [a, b] = ip.split(".").map(Number);
+    if (a === 0) return true; // 0.0.0.0/8（未指定/广播）
+    if (a === 10) return true; // 10/8 私网
+    if (a === 127) return true; // 环回
+    if (a === 169 && b === 254) return true; // 链路本地（含 169.254.169.254 云元数据）
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12 私网
+    if (a === 192 && b === 168) return true; // 192.168/16 私网
+    if (a === 100 && b >= 64 && b <= 127) return true; // 100.64/10 CGNAT 共享地址
+    if (a >= 224) return true; // 组播与保留
+    return false;
+  }
+  if (isIP(ip) === 6) {
+    if (lower === "::" || lower === "::1") return true; // 未指定 / 环回
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7 ULA
+    if (/^fe[89ab]/.test(lower)) return true; // fe80::/10 链路本地
+    return false;
+  }
+  return true; // 无法识别视为非法
+}
+
+/** 解析主机并校验所有解析结果均为公网地址；命中内网/保留地址则抛错 */
+async function assertPublicHost(hostname: string): Promise<void> {
+  if (isIP(hostname)) {
+    if (isBlockedIp(hostname)) {
+      throw new Error(`目标地址 ${hostname} 属于内网/保留地址，已阻止访问`);
+    }
+    return;
+  }
+  const addresses = await lookup(hostname, { all: true });
+  for (const { address } of addresses) {
+    if (isBlockedIp(address)) {
+      throw new Error(`目标 ${hostname} 解析到内网/保留地址 ${address}，已阻止访问`);
+    }
+  }
+}
+
+/** 带 SSRF 防护的抓取：逐跳校验主机，最多跟随 5 次重定向 */
+async function safeFetch(
+  url: string,
+  timeoutMs: number,
+  headers: Record<string, string>,
+): Promise<Response> {
+  let current = url;
+  for (let hop = 0; hop <= 5; hop++) {
+    const u = new URL(current);
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      throw new Error(`仅支持 http/https 链接，收到: ${u.protocol}//`);
+    }
+    await assertPublicHost(u.hostname);
+    const res = await fetch(current, {
+      headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      current = new URL(location, current).toString();
+      continue;
+    }
+    return res;
+  }
+  throw new Error("重定向次数过多（超过 5 次）");
 }
 
 /** 解码常用 HTML 实体 */
@@ -158,13 +235,9 @@ export async function fetchUrlAsText(
   if (u.protocol !== "http:" && u.protocol !== "https:") {
     throw new Error(`仅支持 http/https 链接，收到: ${u.protocol}//`);
   }
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": DEFAULT_UA,
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    },
-    redirect: "follow",
-    signal: AbortSignal.timeout(20_000),
+  const res = await safeFetch(url, 20_000, {
+    "User-Agent": DEFAULT_UA,
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   const raw = await res.text();

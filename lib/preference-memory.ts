@@ -157,8 +157,18 @@ export function restorePreferenceMemory(data: {
   }
   for (const [key, content] of Object.entries(data?.projects ?? {})) {
     const p = path.join(memoryRoot(), "projects", key, "project_memory.md");
-    // 防御路径穿越：key 仅允许 [A-Za-z0-9_-]
-    if (!/^[A-Za-z0-9_-]+$/.test(key)) continue;
+    // 防御路径穿越：key 允许任意非路径分隔符字符（与 encodeWorkdir 输出对齐，含中文/emoji），
+    // 但禁止为空、".." 或含 / \ 的分隔符，防止跳出 projects 目录
+    if (
+      !key ||
+      key === "." ||
+      key === ".." ||
+      key.includes("/") ||
+      key.includes("\\") ||
+      key.includes("\0")
+    ) {
+      continue;
+    }
     writeMemoryFile(p, content);
   }
 }

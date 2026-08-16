@@ -54,6 +54,7 @@ interface PendingEntry {
 const pending = new Map<string, PendingEntry>();
 const lifecycleListeners = new Set<(e: PlanLifecycleEvent) => void>();
 let db: DatabaseSync | undefined;
+let loaded = false;
 
 function getDb(): DatabaseSync {
   if (db) return db;
@@ -74,6 +75,17 @@ function getDb(): DatabaseSync {
   `);
   db = d;
   return d;
+}
+
+/**
+ * 惰性加载：确保 DB 在配置注入（configure）之后才打开。
+ * 之前为模块加载时立即 loadPlans()，在 Electron 形态下早于 configure()，
+ * 导致 plans.db 落在 process.cwd() 而非 PRYSM_BASE_DIR(userData)。
+ */
+function ensureLoaded(): void {
+  if (loaded) return;
+  loadPlans();
+  loaded = true;
 }
 
 /** 进程启动时恢复未决计划（decided 历史仅保留最近 top-K，避免膨胀） */
@@ -172,6 +184,7 @@ export interface ProposePlanInput {
  * 返回 Promise<{ approved: boolean; plan: Plan }>；超时视为拒绝。
  */
 export function proposePlan(input: ProposePlanInput): Promise<{ approved: boolean; plan: Plan }> {
+  ensureLoaded();
   return new Promise((resolve) => {
     const createdAt = Date.now();
     const effectiveTimeout = input.timeoutMs ?? getPlanTimeoutMs();
@@ -216,6 +229,7 @@ export function proposePlan(input: ProposePlanInput): Promise<{ approved: boolea
 
 /** 用户对计划作出决定（同意/拒绝）。返回 false 表示该计划已不存在/超时 */
 export function decidePlan(id: string, approve: boolean): boolean {
+  ensureLoaded();
   const entry = pending.get(id);
   if (!entry) return false;
   pending.delete(id);
@@ -230,6 +244,7 @@ export function decidePlan(id: string, approve: boolean): boolean {
 
 /** 取消未决计划 */
 export function cancelPlan(id: string, reason = "用户取消"): boolean {
+  ensureLoaded();
   const entry = pending.get(id);
   if (!entry) return false;
   pending.delete(id);
@@ -244,6 +259,7 @@ export function cancelPlan(id: string, reason = "用户取消"): boolean {
 
 /** 未决计划快照（按会话过滤可选） */
 export function listPendingPlans(sessionId?: string): Plan[] {
+  ensureLoaded();
   const out: Plan[] = [];
   for (const { plan } of pending.values()) {
     if (sessionId && plan.sessionId !== sessionId) continue;
@@ -254,6 +270,7 @@ export function listPendingPlans(sessionId?: string): Plan[] {
 
 /** 查询单个计划（含已决历史） */
 export function getPlan(id: string): Plan | null {
+  ensureLoaded();
   const p = pending.get(id)?.plan;
   if (p) return clonePlan(p);
   const r = getDb().prepare("SELECT * FROM plans WHERE id = ?").get(id) as
@@ -291,6 +308,7 @@ function clonePlan(p: Plan): Plan {
 
 /** 清空未决与历史（测试用） */
 export function clearPlans(): void {
+  ensureLoaded();
   pending.clear();
   const d = getDb();
   d.exec("DELETE FROM plans");
@@ -299,6 +317,7 @@ export function clearPlans(): void {
 /** 关闭并重置连接（测试用） */
 export function resetPlans(): void {
   pending.clear();
+  loaded = false;
   try {
     db?.close();
   } catch {
@@ -310,13 +329,12 @@ export function resetPlans(): void {
 /** 模拟进程重启：清空内存状态后从数据库重新加载（测试/热恢复用） */
 export function reloadPlans(): void {
   pending.clear();
+  loaded = false;
   try {
     db?.close();
   } catch {
     /* 未打开 */
   }
   db = undefined;
-  loadPlans();
+  ensureLoaded();
 }
-
-loadPlans();

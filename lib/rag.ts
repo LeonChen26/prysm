@@ -77,6 +77,11 @@ function queryTokens(query: string, topN = 10): string[] {
     .slice(0, topN);
 }
 
+/** FTS5 MATCH 短语转义：去掉双引号等语法残留，防止含引号查询抛 SQL 错误 */
+function ftsPhrase(token: string): string {
+  return `"${token.replace(/"/g, " ").trim()}"`;
+}
+
 /** 索引时跳过的大小写无关扩展名（二进制/与代码无关） */
 const SKIP_EXT = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".bmp", ".tiff",
@@ -107,9 +112,13 @@ export async function indexRoot(root: string): Promise<IndexStats> {
   let added = 0;
   let updated = 0;
   let scanned = 0;
+  let truncated = false; // 扫描触及上限被截断：此时无法区分"文件已消失"与"未扫描到"，跳过删除阶段
 
   const walk = async (dir: string, rel: string) => {
-    if (scanned >= ragScanLimit()) return;
+    if (scanned >= ragScanLimit()) {
+      truncated = true;
+      return;
+    }
     let entries;
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
@@ -117,7 +126,10 @@ export async function indexRoot(root: string): Promise<IndexStats> {
       return;
     }
     for (const e of entries) {
-      if (scanned >= ragScanLimit()) return;
+      if (scanned >= ragScanLimit()) {
+        truncated = true;
+        return;
+      }
       const abs = path.join(dir, e.name);
       const relStr = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
@@ -181,17 +193,19 @@ export async function indexRoot(root: string): Promise<IndexStats> {
   };
 
   await walk(root, "");
-  // 删除已从磁盘消失的文件
+  // 删除已从磁盘消失的文件（仅当本轮完整扫描；被上限截断时跳过，防误删未遍历文件）
   const existing = d
     .prepare("SELECT rel_path FROM rag_docs WHERE dir = ?")
     .all(root) as { rel_path: string }[];
   let removed = 0;
-  for (const row of existing) {
-    if (!relPaths.has(row.rel_path)) {
-      const r = d
-        .prepare("DELETE FROM rag_docs WHERE dir = ? AND rel_path = ?")
-        .run(root, row.rel_path);
-      if (r.changes > 0) removed++;
+  if (!truncated) {
+    for (const row of existing) {
+      if (!relPaths.has(row.rel_path)) {
+        const r = d
+          .prepare("DELETE FROM rag_docs WHERE dir = ? AND rel_path = ?")
+          .run(root, row.rel_path);
+        if (r.changes > 0) removed++;
+      }
     }
   }
   // 清理孤儿 FTS 行（rowid 不再对应 rag_docs.id）
@@ -225,7 +239,7 @@ export function retrieveRag(query: string, k = ragRecallK()): RagHit[] {
   if (!ragEnabled()) return [];
   const tokens = queryTokens(query);
   if (tokens.length === 0) return [];
-  const match = tokens.map((t) => `"${t}"`).join(" OR ");
+  const match = tokens.map(ftsPhrase).join(" OR ");
   const rows = getDb()
     .prepare(
       `SELECT d.dir, d.rel_path, d.content

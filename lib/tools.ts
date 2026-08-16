@@ -6,7 +6,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
 import { fetchUrlAsText, webSearch } from "./web";
-import { AGENT_WORKDIR, ALLOWED_ROOTS, getAllowedRoots, getAgentWorkdir, resolveInWorkdirOrThrow as resolveInWorkdirOrThrowBase } from "./paths";
+import { getAllowedRoots, getAgentWorkdir, resolveInWorkdirOrThrow as resolveInWorkdirOrThrowBase } from "./paths";
 import { TOOL_META } from "./tool-meta";
 import type { SubagentSpec } from "./subagent";
 import { proposePlan } from "./plan";
@@ -35,25 +35,25 @@ export function setSpawnSubagentImpl(fn: SpawnSubagentImpl | undefined): void {
 }
 
 /**
- * plan_propose 会话上下文（Phase 7 延迟注入）。
- * agent route 在提示前通过 setPlanCtx 注入当前会话的 sessionId/surface，
- * 供 plan_propose 工具唯一确定计划归属（单用户本地场景，多会话并发时以最近一次为准）。
+ * 工具会话上下文（sessionId/surface/workdir），经 AsyncLocalStorage 注入。
+ * 与 workdirStorage 同理：plan_propose / 记忆工具 / create_automation 读取的是
+ * 当前异步上下文中的值，避免并发会话互相覆盖（修复前为模块级全局变量）。
  */
-let planCtx: { sessionId: string; surface: Surface } | undefined;
-export function setPlanCtx(ctx: { sessionId: string; surface: Surface } | undefined): void {
-  planCtx = ctx;
+interface ToolSessionCtx {
+  sessionId?: string;
+  surface?: Surface;
+  workdir?: string;
+}
+const toolCtxStorage = new AsyncLocalStorage<ToolSessionCtx | undefined>();
+
+/** 在工具会话上下文（sessionId/surface/workdir）中执行 fn（并发会话互不干扰） */
+export function runWithToolCtx<T>(ctx: ToolSessionCtx | undefined, fn: () => T): T {
+  return toolCtxStorage.run(ctx, fn);
 }
 
-/**
- * 偏好记忆工具的会话上下文（Phase：延迟注入，agent route 在提示前设置当前会话 workdir）。
- * 记忆工具（remember_memory / forget_memory）据此确定项目记忆归属的工作区。
- */
-let memoryCtx: { workdir?: string } | undefined;
-export function setMemoryCtx(ctx: { workdir?: string } | undefined): void {
-  memoryCtx = ctx;
-}
-export function getMemoryCtx(): { workdir?: string } | undefined {
-  return memoryCtx;
+/** 读取当前异步上下文中的工具会话上下文 */
+export function getToolCtx(): ToolSessionCtx | undefined {
+  return toolCtxStorage.getStore();
 }
 
 /**
@@ -81,12 +81,11 @@ export function getSessionWorkdirOverride(): string | undefined {
   return workdirStorage.getStore();
 }
 
-/**
- * 当前生效的工作目录：优先使用绑定目录，回退全局默认工作区。
- * 工具执行层在 runWithWorkdir 块内调用，读取上下文中的会话绑定 workdir。
- */
+/** 当前生效的工作目录：优先使用绑定目录，回退全局默认工作区。
+ * 注意：用 getAgentWorkdir() 惰性读取而非 AGENT_WORKDIR 常量——
+ * 常量在模块加载时求值，Electron 下早于 configure()，会拿到错误的 baseDir。 */
 function effectiveWorkdir(): string {
-  return workdirStorage.getStore() ?? AGENT_WORKDIR;
+  return workdirStorage.getStore() ?? getAgentWorkdir();
 }
 
 /** 仅供测试：暴露 effectiveWorkdir 给单测验证并发隔离 */
@@ -960,8 +959,8 @@ export const tools: AgentTool<any>[] = [
         `运行时长: ${Math.floor(process.uptime() / 60)} 分钟 ${Math.floor(process.uptime() % 60)} 秒`,
         `内存占用: ${(mem.rss / 1024 / 1024).toFixed(1)} MB (rss) / ${(mem.heapUsed / 1024 / 1024).toFixed(1)} MB (heap)`,
         `工作区目录: ${effectiveWorkdir()}`,
-        ALLOWED_ROOTS.length > 0
-          ? `白名单目录: ${ALLOWED_ROOTS.join(", ")}`
+        getAllowedRoots().length > 0
+          ? `白名单目录: ${getAllowedRoots().join(", ")}`
           : "白名单目录: (无)",
       ];
       return {
@@ -1039,7 +1038,9 @@ export const tools: AgentTool<any>[] = [
         };
       }
       const summary = await spawnSubagentImpl({
-        parentSessionId: _toolCallId,
+        // 用真实父会话 id（而非工具调用 id）：子 agent 审批/审计可按父会话追溯，
+        // 且审批事件经 bus 前缀匹配能送达前端（修复前收不到审批卡，卡到超时拒绝）
+        parentSessionId: getToolCtx()?.sessionId ?? _toolCallId,
         task: params.task,
         capability: params.capability ?? "readonly",
         surface: params.surface,
@@ -1082,7 +1083,8 @@ export const tools: AgentTool<any>[] = [
         steps: { title: string; detail?: string; tool?: string; expected?: string }[];
         timeoutMs?: number;
       };
-      if (!planCtx) {
+      const ctx = getToolCtx();
+      if (!ctx?.sessionId) {
         return {
           content: [
             {
@@ -1102,8 +1104,8 @@ export const tools: AgentTool<any>[] = [
         };
       }
       const { approved, plan } = await proposePlan({
-        sessionId: planCtx.sessionId,
-        surface: planCtx.surface,
+        sessionId: ctx.sessionId,
+        surface: ctx.surface ?? "coding",
         summary: params.summary,
         steps: params.steps,
         timeoutMs: params.timeoutMs,
@@ -1189,7 +1191,7 @@ export const tools: AgentTool<any>[] = [
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs & { content: string; scope?: MemoryScope };
       const scope = params.scope === "global" ? "global" : "project";
-      const workdir = memoryCtx?.workdir;
+      const workdir = getToolCtx()?.workdir;
       const added = upsertPreference(scope, params.content ?? "", workdir);
       const entries = listPreferenceEntries(scope, workdir);
       return {
@@ -1225,7 +1227,7 @@ export const tools: AgentTool<any>[] = [
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs & { content: string; scope?: MemoryScope };
       const scope = params.scope === "global" ? "global" : "project";
-      const workdir = memoryCtx?.workdir;
+      const workdir = getToolCtx()?.workdir;
       const removed = removePreference(scope, params.content ?? "", workdir);
       const entries = listPreferenceEntries(scope, workdir);
       return {
@@ -1288,7 +1290,7 @@ export const tools: AgentTool<any>[] = [
       const a = createAutomation({
         name: params.name,
         prompt: params.prompt,
-        surface: planCtx?.surface ?? "coding",
+        surface: getToolCtx()?.surface ?? "coding",
         workdir: getSessionWorkdirOverride(),
         scheduleType: hasInterval ? "interval" : "cron",
         intervalMinutes: hasInterval ? params.interval_minutes : undefined,

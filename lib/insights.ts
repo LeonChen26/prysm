@@ -337,20 +337,29 @@ export function getInsightsOverview(runLimit = 100): {
       .all() as { score: number; at: number }[]
   ).map((r) => ({ score: Number(r.score), at: Number(r.at) }));
 
-  // 模型表现：按 turns.model 聚合（1:1 关联 llm_judge / 规则评分，避免笛卡尔积）
+  // 模型表现：按 turns.model 聚合（分别子查询聚合评分与规则问题，避免双 JOIN 笛卡尔积放大计数）
   const modelStats: ModelStat[] = (
     d
       .prepare(
         `SELECT t.model AS model,
                 COUNT(*) AS runs,
-                COUNT(s.id) AS judge_count,
-                AVG(s.score) AS avg_score,
-                SUM(CASE WHEN s.score IS NOT NULL AND s.score < 7 THEN 1 ELSE 0 END) AS low_count,
-                COUNT(r.id) AS rule_issues,
+                COALESCE(SUM(j.judge_count), 0) AS judge_count,
+                AVG(j.avg_score) AS avg_score,
+                COALESCE(SUM(j.low_count), 0) AS low_count,
+                COALESCE(SUM(ru.rule_issues), 0) AS rule_issues,
                 COALESCE(SUM(t.tokens_total), 0) AS total_tokens
          FROM turns t
-         LEFT JOIN scores s ON s.run_id = t.id AND s.kind = 'rule' AND s.label = 'llm_judge' AND s.score IS NOT NULL
-         LEFT JOIN scores r ON r.run_id = t.id AND r.kind = 'rule' AND r.label IN ('run_error', 'run_stopped', 'no_tools')
+         LEFT JOIN (
+           SELECT run_id, COUNT(*) AS judge_count, AVG(score) AS avg_score,
+                  SUM(CASE WHEN score < 7 THEN 1 ELSE 0 END) AS low_count
+           FROM scores WHERE kind = 'rule' AND label = 'llm_judge' AND score IS NOT NULL
+           GROUP BY run_id
+         ) j ON j.run_id = t.id
+         LEFT JOIN (
+           SELECT run_id, COUNT(*) AS rule_issues
+           FROM scores WHERE kind = 'rule' AND label IN ('run_error', 'run_stopped', 'no_tools')
+           GROUP BY run_id
+         ) ru ON ru.run_id = t.id
          WHERE t.model IS NOT NULL AND t.model != ''
          GROUP BY t.model
          ORDER BY runs DESC`,

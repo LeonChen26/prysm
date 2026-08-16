@@ -1512,6 +1512,7 @@ export function ChatPanel() {
           body: JSON.stringify({
             message: t,
             sessionId: overrideSessionId === undefined ? sessionId : overrideSessionId,
+            surface,
             rewindToText,
             rewindToIndex,
             approvalMode,
@@ -1704,7 +1705,7 @@ export function ChatPanel() {
         refreshStats();
       }
     },
-    [sessionId, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion, notifyApproval, showNotice, applyApprovalToCard, approvalMode],
+    [sessionId, surface, refreshSessions, refreshMemory, refreshRunLogs, refreshAudits, refreshStats, sessions, notifyCompletion, notifyApproval, showNotice, applyApprovalToCard, approvalMode],
   );
 
   /** 新建会话（携带当前 surface 形态；preset 可选：创建后立即以该提示词发起任务） */
@@ -2335,8 +2336,9 @@ export function ChatPanel() {
       const from = ids.indexOf(fromId);
       const to = ids.indexOf(targetId);
       if (from < 0 || to < 0) return;
+      // 先删后插：删除 from 后数组前移，目标插入位置需相应校正（from < to 时 -1），否则向下拖动错一位
       ids.splice(from, 1);
-      ids.splice(to, 0, fromId);
+      ids.splice(from < to ? to - 1 : to, 0, fromId);
       const map = new Map(todos.map((t) => [t.id, t]));
       setTodos(
         ids.flatMap((id) => {

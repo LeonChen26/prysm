@@ -24,6 +24,7 @@ export interface TodoUpdate {
 
 let todos: TodoItem[] = [];
 let seq = 0;
+let loaded = false;
 let db: DatabaseSync | undefined;
 
 function getDb(): DatabaseSync {
@@ -64,6 +65,17 @@ function loadTodos(): void {
   }
 }
 
+/**
+ * 惰性加载：确保 DB 在配置注入（configure）之后才打开。
+ * 之前为模块加载时立即 loadTodos()，在 Electron 形态下早于 configure()，
+ * 导致 todo.db 落在 process.cwd() 而非 PRYSM_BASE_DIR(userData)。
+ */
+function ensureLoaded(): void {
+  if (loaded) return;
+  loadTodos();
+  loaded = true;
+}
+
 /** 变更后全量落盘（简单可靠，清单规模很小） */
 function saveTodos(): void {
   const d = getDb();
@@ -91,8 +103,6 @@ function genId(): string {
   }
 }
 
-loadTodos();
-
 /** 返回深拷贝快照，避免调用方持有的引用被后续状态变更污染 */
 function snapshot(): TodoItem[] {
   return todos.map((t) => ({ ...t }));
@@ -112,6 +122,7 @@ export function formatTodos(list: TodoItem[]): string {
 export function createTodos(
   items: { title: string; detail?: string }[],
 ): { todos: TodoItem[]; msg: string } {
+  ensureLoaded();
   // 覆盖式：清空旧清单并重置序号，保证新 id 从 todo-1 开始（不受恢复的历史干扰）
   todos = [];
   seq = 0;
@@ -133,6 +144,7 @@ export function modifyTodos(
   updates?: TodoUpdate[],
   append?: { title: string; detail?: string }[],
 ): { todos: TodoItem[]; msg: string } {
+  ensureLoaded();
   for (const u of updates ?? []) {
     const t = todos.find((item) => item.id === u.id);
     if (!t) throw new Error(`任务 "${u.id}" 不存在，请先 todo_list 查看当前清单`);
@@ -151,6 +163,7 @@ export function modifyTodos(
 
 /** todo_list：列出当前清单 */
 export function listTodos(): { todos: TodoItem[]; msg: string } {
+  ensureLoaded();
   return {
     todos: snapshot(),
     msg:
@@ -162,14 +175,18 @@ export function listTodos(): { todos: TodoItem[]; msg: string } {
 
 /** todo_reorder：按给定 id 顺序重排清单（未提及的项按原相对顺序排在末尾） */
 export function reorderTodos(ids: string[]): { todos: TodoItem[]; msg: string } {
+  ensureLoaded();
   const map = new Map(todos.map((t) => [t.id, t]));
   const next: TodoItem[] = [];
+  const seen = new Set<string>(); // 去重：重复 id 只保留首次，避免主键冲突
   for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
     const t = map.get(id);
     if (t) next.push(t);
   }
   for (const t of todos) {
-    if (!ids.includes(t.id)) next.push(t);
+    if (!seen.has(t.id)) next.push(t);
   }
   todos = next;
   saveTodos();
@@ -178,6 +195,7 @@ export function reorderTodos(ids: string[]): { todos: TodoItem[]; msg: string } 
 
 /** todo_remove：按 id 删除子任务 */
 export function removeTodos(ids: string[]): { todos: TodoItem[]; msg: string } {
+  ensureLoaded();
   todos = todos.filter((t) => !ids.includes(t.id));
   saveTodos();
   return { todos: snapshot(), msg: "已删除任务。" };
@@ -185,11 +203,13 @@ export function removeTodos(ids: string[]): { todos: TodoItem[]; msg: string } {
 
 /** 导出当前任务清单（供备份恢复） */
 export function exportTodos(): TodoItem[] {
+  ensureLoaded();
   return snapshot();
 }
 
 /** 导入任务清单（替换现有清单，保留原 id 与状态） */
 export function importTodos(list: TodoItem[]): void {
+  ensureLoaded();
   todos = (Array.isArray(list) ? list : []).map((t) => ({
     id: t.id,
     title: t.title,

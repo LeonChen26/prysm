@@ -11,11 +11,7 @@ import { createSession, saveSessionMessages, touchSession } from "./session";
 import { getAgent, logRun } from "./agent";
 import { addWorkspace, grantWorkspaceAccess } from "./workspace";
 import { setSessionWorkdir } from "./agent-context";
-import {
-  setMemoryCtx,
-  setPlanCtx,
-  runWithWorkdir,
-} from "./tools";
+import { runWithToolCtx, runWithWorkdir } from "./tools";
 import type { AgentEventBus } from "./events";
 import {
   computeNextRunAt,
@@ -37,9 +33,29 @@ export function bindAutomationEventBus(bus: AgentEventBus | undefined): void {
   eventBus = bus;
 }
 
-/** 启动调度器（幂等） */
+/**
+ * 跨模块实例共享调度器定时器引用（挂在 globalThis 上）。
+ * 修复：dev 热重载重新求值本模块时，旧实例的 interval 无人 clear，
+ * 若新实例再 setInterval 会造成双 tick；借助全局引用让新实例直接复用旧 timer。
+ */
+const GLOBAL_KEY = "__prysm_scheduler_timer__";
+type GlobalTimer = { ref: ReturnType<typeof setInterval> | undefined };
+function globalTimer(): GlobalTimer {
+  const g = globalThis as Record<string, unknown>;
+  if (!g[GLOBAL_KEY]) g[GLOBAL_KEY] = { ref: undefined };
+  return g[GLOBAL_KEY] as GlobalTimer;
+}
+
+/** 启动调度器（幂等；跨 HMR 复用已有 interval） */
 export function startScheduler(): void {
   if (started) return;
+  const shared = globalTimer();
+  if (shared.ref !== undefined) {
+    // 旧模块实例遗留的 interval 仍存活 → 直接复用，不重复创建
+    timer = shared.ref;
+    started = true;
+    return;
+  }
   started = true;
   timer = setInterval(() => {
     void tickAutomations().catch((err) => {
@@ -47,6 +63,7 @@ export function startScheduler(): void {
     });
   }, TICK_MS);
   timer.unref?.();
+  shared.ref = timer;
 }
 
 /** 停止调度器（测试/热重载） */
@@ -55,6 +72,7 @@ export function stopScheduler(): void {
     clearInterval(timer);
     timer = undefined;
   }
+  globalTimer().ref = undefined;
   started = false;
 }
 
@@ -67,6 +85,12 @@ export async function runAutomationNow(
 ): Promise<{ status: AutomationStatus; sessionId?: string; error?: string }> {
   const a = getAutomation(automationId);
   if (!a) throw new Error(`定时任务 "${automationId}" 不存在`);
+  // 防重叠：上一轮仍在运行（调度 tick 或手动触发）时直接拒绝，避免同一任务并发执行
+  const fresh = getAutomation(automationId);
+  if (fresh?.lastStatus === "running") {
+    recordRun(automationId, undefined, "skipped", Date.now(), Date.now(), "任务执行中，手动触发被跳过");
+    return { status: "skipped" };
+  }
   const startedAt = Date.now();
   updateAutomation(a.id, { lastStatus: "running", lastRunAt: startedAt });
   let sessionId: string | undefined;
@@ -82,16 +106,19 @@ export async function runAutomationNow(
       setSessionWorkdir(sessionId, a.workdir);
     }
     // 注入本轮上下文（对齐 app/api/agent/route.ts：plan_propose 归属 / 工作区根 / 记忆工作区）
-    setPlanCtx({ sessionId, surface: a.surface });
-    setMemoryCtx({ workdir: a.workdir });
     try {
       const agent = await getAgent(sessionId);
-      // 在任务绑定工作目录上下文中执行 prompt + 工具调用链；
-      // AsyncLocalStorage 保证并发执行的多任务各自读到自己的工作目录。
-      await runWithWorkdir(a.workdir, async () => {
-        await agent.prompt(a.prompt);
-        await agent.waitForIdle();
-      });
+      // 在「工具会话上下文 + 任务绑定工作目录」下执行 prompt + 工具调用链；
+      // AsyncLocalStorage 保证并发执行的多任务各自读到自己的 sessionId/workdir。
+      await runWithToolCtx(
+        { sessionId, surface: a.surface, workdir: a.workdir },
+        async () => {
+          await runWithWorkdir(a.workdir, async () => {
+            await agent.prompt(a.prompt);
+            await agent.waitForIdle();
+          });
+        },
+      );
       // 持久化会话消息（全量替换）
       saveSessionMessages(sessionId, agent.state.messages);
     } finally {

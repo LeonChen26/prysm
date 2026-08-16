@@ -239,16 +239,23 @@ export function saveSessionMessages(
   messages: AgentMessage[],
 ): void {
   const d = getDb();
-  // 只物理删除未软删的行，deleted=1 的历史行保留（软删可追溯，行 id 保持稳定）
-  d.prepare("DELETE FROM session_messages WHERE session_id = ? AND deleted = 0").run(
-    sessionId,
-  );
-  const ins = d.prepare(
-    "INSERT INTO session_messages (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
-  );
-  const now = Date.now();
-  for (const m of messages) {
-    ins.run(sessionId, m.role, JSON.stringify(m), m.timestamp ?? now);
+  d.exec("BEGIN");
+  try {
+    // 只物理删除未软删的行，deleted=1 的历史行保留（软删可追溯，行 id 保持稳定）
+    d.prepare("DELETE FROM session_messages WHERE session_id = ? AND deleted = 0").run(
+      sessionId,
+    );
+    const ins = d.prepare(
+      "INSERT INTO session_messages (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
+    );
+    const now = Date.now();
+    for (const m of messages) {
+      ins.run(sessionId, m.role, JSON.stringify(m), m.timestamp ?? now);
+    }
+    d.exec("COMMIT");
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
   }
   touchSession(sessionId);
 }
@@ -264,14 +271,16 @@ export function searchSessionMessages(
   query: string,
   limit = 20,
 ): SearchHit[] {
-  const q = `%${query}%`;
+  // 转义 LIKE 通配符，使用户输入的 % / _ 按字面匹配而非通配
+  const escaped = query.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const q = `%${escaped}%`;
   const d = getDb();
   const rows = d
     .prepare(
       `SELECT m.session_id AS sid, s.title AS title, m.content AS content
        FROM session_messages m
        JOIN sessions s ON s.id = m.session_id
-       WHERE m.content LIKE ? AND m.deleted = 0
+       WHERE m.content LIKE ? ESCAPE '\\' AND m.deleted = 0
        ORDER BY m.id DESC
        LIMIT 300`,
     )

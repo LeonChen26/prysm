@@ -350,8 +350,9 @@ export class McpClientPool {
       prompts: [],
     };
     this.handles.set(name, h);
+    let client: Client | null = null;
     try {
-      const client = await this.createClient(name, options);
+      client = await this.createClient(name, options);
       // connect 是异步的：用 ping 等待初始化完成（带超时，可用 START_MCP_TIMEOUT_MS 覆盖）
       const { connect } = resolveTimeouts(options);
       await withTimeout(
@@ -376,6 +377,12 @@ export class McpClientPool {
       }
       h.status = "connected";
     } catch (err) {
+      // 失败路径：关闭已创建但未完成初始化的 client（stdio 子进程 / HTTP 连接），防止泄漏
+      try {
+        await client?.close();
+      } catch {
+        /* 忽略关闭错误 */
+      }
       h.status = "error";
       h.error = err instanceof Error ? err.message : String(err);
       console.error(`[mcp] server "${name}" 连接失败: ${h.error}`);
@@ -426,7 +433,12 @@ export class McpClientPool {
     let h = this.handles.get(name);
     if (!h) throw new Error(`MCP server "${name}" 未配置`);
     if (h.status === "error") {
-      // 自动重连：重建句柄
+      // 自动重连：先关闭旧连接（stdio 子进程 / HTTP），再重建句柄，防止连接/进程泄漏
+      try {
+        await h.client?.close();
+      } catch {
+        /* 忽略关闭错误 */
+      }
       this.handles.delete(name);
       h = await this.buildHandle(name, h.options);
     }
@@ -654,6 +666,12 @@ let mcpPool: McpClientPool | undefined;
 
 /** 注入 MCP 配置路径（createCore 时调用；缺省 <baseDir>/mcp.json） */
 export function configureMcp(mcpConfigPath?: string): McpClientPool {
+  // 替换旧池前先关闭其全部连接（stdio 子进程 / HTTP），防止热重载/多实例泄漏
+  if (mcpPool) {
+    void mcpPool.close().catch(() => {
+      /* 关闭失败不影响重建 */
+    });
+  }
   mcpPool = new McpClientPool(mcpConfigPath);
   return mcpPool;
 }

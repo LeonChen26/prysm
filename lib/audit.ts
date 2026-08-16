@@ -64,19 +64,34 @@ function getDb(): DatabaseSync {
   return d;
 }
 
-/** 常见密钥字段名：命中即脱敏 */
-const SECRET_KEY_RE = /token|secret|password|passwd|apikey|api_key|key|authorization|cookie|credential/i;
+/**
+ * 常见密钥字段名：命中即脱敏。
+ * 注意：不再含裸 "key"（会误伤 monkey/keyboard/turkey 等普通字段名），
+ * 密钥串脱敏交给下面的 TOKEN_PATTERNS 文本级匹配兜底。
+ */
+const SECRET_KEY_RE = /token|secret|password|passwd|apikey|api_key|authorization|cookie|credential/i;
+
+/** 常见密钥串模式（字段名未命中时，文本内嵌的长密钥也打码） */
+const TOKEN_PATTERNS = [
+  /\bsk-[A-Za-z0-9_-]{10,}\b/g, // OpenAI / Anthropic / DeepSeek 等
+  /\bghp_[A-Za-z0-9]{20,}\b/g, // GitHub Personal Access Token
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, // Slack tokens
+  /\bAKIA[0-9A-Z]{16}\b/g, // AWS Access Key
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, // Authorization Bearer 头
+];
 
 /**
  * 序列化工具参数并脱敏：
  * - key 命中密钥命名 → 值替换为 [redacted]
- * - 文本中内嵌的长密钥串（如 sk-xxx）也一并打码
+ * - 文本中内嵌的长密钥串（sk-xxx / ghp_xxx 等）也一并打码
  */
 export function redactArgs(args: unknown): string {
   const redact = (value: unknown, key?: string): unknown => {
     if (typeof value === "string") {
       if (key && SECRET_KEY_RE.test(key)) return "[redacted]";
-      return value.replace(/\bsk-[A-Za-z0-9_-]{10,}\b/g, "sk-[redacted]");
+      let out = value;
+      for (const re of TOKEN_PATTERNS) out = out.replace(re, "[redacted]");
+      return out;
     }
     if (Array.isArray(value)) return value.map((v) => redact(v));
     if (value && typeof value === "object") {

@@ -52,6 +52,10 @@ export async function POST(req: Request) {
       }
       const check = resolveInWorkdir(dir, root);
       if (!check.ok) return authorizationError(check);
+      // 上传大小限制（100MB）：防止大文件 arrayBuffer 全量读入内存导致 OOM
+      if (file.size > 100 * 1024 * 1024) {
+        return Response.json({ error: "文件过大（上限 100MB）" }, { status: 413 });
+      }
       const buf = Buffer.from(await file.arrayBuffer());
       const name = file.name.replace(/[\\/]/g, "");
       const rel = [dir, name].filter(Boolean).join("/");

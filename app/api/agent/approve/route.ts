@@ -10,7 +10,11 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     id = String(body?.id ?? "");
-    approve = Boolean(body?.approve);
+    // 严格布尔校验：字符串 "false"/"0"/"yes" 等一律按非法处理，防止拒绝被误判为批准
+    if (typeof body?.approve !== "boolean") {
+      return Response.json({ error: "approve 必须是布尔值 true/false" }, { status: 400 });
+    }
+    approve = body.approve;
   } catch {
     return Response.json({ error: "请求体必须是 JSON: { id, approve }" }, { status: 400 });
   }

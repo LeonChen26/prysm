@@ -350,3 +350,6 @@ npm run test:e2e      # 端到端测试（需先启动 npm run dev）
 
 - [docs/architecture.md](docs/architecture.md) —— 目标架构与落地路线（v8，12 Phase 全部完成）
 - [docs/distribution.md](docs/distribution.md) —— 打包与分发说明
+- [docs/learning-roadmap.md](docs/learning-roadmap.md) —— 代码学习 / 检视路线图（小白向，从零读懂本项目）
+- [docs/bug-audit.md](docs/bug-audit.md) —— 代码审查报告（自研代码已知问题清单与修复建议）
+- [docs/design/](docs/design/) —— 自研代码设计文档（按模块归类，含 01-core / 02-tools / 03-security / 04-data / 05-web / 06-electron）

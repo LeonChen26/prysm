@@ -67,6 +67,11 @@ function queryTokens(query: string, topN = 8): string[] {
     .slice(0, topN);
 }
 
+/** FTS5 MATCH 短语转义：去掉双引号与 NEAR 等语法残留，防止含引号查询抛 SQL 错误 */
+function ftsPhrase(token: string): string {
+  return `"${token.replace(/"/g, " ").trim()}"`;
+}
+
 /** 批量写入 episode（按 role+content 去重），返回新增条数 */
 export function rememberMessages(messages: AgentMessage[]): number {
   const d = getDb();
@@ -123,8 +128,8 @@ export function retrieveEpisodeDetails(
 ): MemoryHit[] {
   const tokens = queryTokens(query);
   if (tokens.length === 0) return [];
-  // OR 匹配 + BM25 排序：让包含更多关键词的 episode 排前
-  const match = tokens.map((t) => `"${t}"`).join(" OR ");
+  // OR 匹配 + BM25 排序：让包含更多关键词的 episode 排前（token 经 ftsPhrase 转义防语法错误）
+  const match = tokens.map(ftsPhrase).join(" OR ");
   return getDb()
     .prepare(
       `SELECT e.role, e.content, e.ts
