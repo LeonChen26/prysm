@@ -205,17 +205,25 @@ export function deleteSessionMessages(
       "SELECT id, role FROM session_messages WHERE session_id = ? AND deleted = 0 ORDER BY id",
     )
     .all(sessionId) as { id: number; role: string }[];
+  // 前端 UI 消息数组不含 toolResult（toUiMessage 过滤），先把 UI 索引映射回全量行下标
+  const uiToRow: number[] = [];
+  for (let k = 0; k < rows.length; k++) {
+    if (rows[k].role === "user" || rows[k].role === "assistant") {
+      uiToRow.push(k);
+    }
+  }
   const valid = [...new Set(indices)]
-    .filter((i) => Number.isInteger(i) && i >= 0 && i < rows.length)
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < uiToRow.length)
     .sort((a, b) => b - a);
   if (valid.length === 0) {
     throw new Error(`没有有效的消息索引: ${indices.join(",")}`);
   }
   const toDelete = new Set<number>();
   for (const i of valid) {
-    for (let j = i; j < rows.length; j++) {
+    const start = uiToRow[i];
+    for (let j = start; j < rows.length; j++) {
       // 下一条 user 消息（非删除点本身）是下一轮的起点，不在级联范围内
-      if (j > i && rows[j].role === "user") break;
+      if (j > start && rows[j].role === "user") break;
       toDelete.add(rows[j].id);
     }
   }

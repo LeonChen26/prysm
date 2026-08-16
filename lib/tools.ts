@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { exec } from "node:child_process";
@@ -55,18 +56,42 @@ export function getMemoryCtx(): { workdir?: string } | undefined {
   return memoryCtx;
 }
 
-/** 会话级工作目录覆盖（绑定目录 > 全局默认 AGENT_WORKDIR） */
-let sessionWorkdirOverride: string | undefined;
-export function setSessionWorkdirOverride(wd: string | undefined): void {
-  sessionWorkdirOverride = wd;
-}
-export function getSessionWorkdirOverride(): string | undefined {
-  return sessionWorkdirOverride;
+/**
+ * 会话级工作目录覆盖（绑定目录 > 全局默认 AGENT_WORKDIR）
+ *
+ * 实现：AsyncLocalStorage 隔离异步上下文，保证多会话并发处理时各会话的
+ *       工具调用读到自己的工作目录，而不会被其他请求覆盖。
+ * 修复前：使用 `let sessionWorkdirOverride` 全局变量，并发请求互相覆盖，
+ *        导致 A 会话的工具在 B 会话绑定的 workdir 下执行（数据完整性问题）。
+ * 调用方：app/api/agent/route.ts 与 lib/scheduler.ts 用 runWithWorkdir(wd, fn)
+ *        包裹 prompt 块；工具内部通过 effectiveWorkdir() 读取当前上下文。
+ */
+const workdirStorage = new AsyncLocalStorage<string | undefined>();
+
+/**
+ * 在指定 workdir 上下文中执行 fn（fn 内部所有 await 链都共享该 workdir）。
+ * 这是设置 workdir 上下文的唯一入口；并发请求各自包裹，互不干扰。
+ */
+export function runWithWorkdir<T>(wd: string | undefined, fn: () => T): T {
+  return workdirStorage.run(wd, fn);
 }
 
-/** 当前生效的工作目录：优先使用绑定目录，回退全局默认工作区 */
+/** 读取当前异步上下文中的 workdir（无上下文返回 undefined） */
+export function getSessionWorkdirOverride(): string | undefined {
+  return workdirStorage.getStore();
+}
+
+/**
+ * 当前生效的工作目录：优先使用绑定目录，回退全局默认工作区。
+ * 工具执行层在 runWithWorkdir 块内调用，读取上下文中的会话绑定 workdir。
+ */
 function effectiveWorkdir(): string {
-  return sessionWorkdirOverride ?? AGENT_WORKDIR;
+  return workdirStorage.getStore() ?? AGENT_WORKDIR;
+}
+
+/** 仅供测试：暴露 effectiveWorkdir 给单测验证并发隔离 */
+export function getEffectiveWorkdirForTest(): string {
+  return effectiveWorkdir();
 }
 
 /** 解析工作区路径：以会话绑定目录为根（未绑定回退全局默认工作区） */

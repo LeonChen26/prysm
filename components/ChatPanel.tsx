@@ -1465,9 +1465,10 @@ export function ChatPanel() {
   /**
    * 核心：向 agent 发送消息并消费 SSE 流。
    * @param text             用户消息内容
-   * @param rewindToText     重新生成时回退到该用户消息（后端按文本截断历史）
+   * @param rewindToText     重新生成时回退到该用户消息（后端按文本截断历史，原文未变场景）
    * @param appendUser       是否追加 user 消息（重新生成时历史已含该消息，跳过）
    * @param overrideSessionId 显式指定会话（模板新建会话后避免闭包中旧 sessionId 造成重复建会话）
+   * @param rewindToIndex    编辑重发时回退到的消息索引（后端按索引截断，不含该条，随后追加编辑后的新消息）
    */
   const streamReply = useCallback(
     async (
@@ -1476,6 +1477,7 @@ export function ChatPanel() {
       appendUser = true,
       overrideSessionId?: string | null,
       images?: { data: string; mimeType: string }[],
+      rewindToIndex?: number,
     ) => {
       const t = text.trim();
       if (!t || busyRef.current) return;
@@ -1511,6 +1513,7 @@ export function ChatPanel() {
             message: t,
             sessionId: overrideSessionId === undefined ? sessionId : overrideSessionId,
             rewindToText,
+            rewindToIndex,
             approvalMode,
             ...(images && images.length > 0 ? { images } : {}),
           }),
@@ -1840,9 +1843,9 @@ export function ChatPanel() {
     if (editingIndex >= 0 && messages[editingIndex]?.role === "user") {
       const idx = editingIndex;
       setEditingIndex(-1);
-      // 截断到该条用户消息并替换为编辑后的内容，后端按 rewindToText 同步截断历史
+      // 截断到该条用户消息（不含）并替换为编辑后的内容，后端按 rewindToIndex 截断历史后追加新文本
       setMessages((m) => m.slice(0, idx).concat([{ role: "user", text }]));
-      await streamReply(text, text, false, undefined, images);
+      await streamReply(text, undefined, false, undefined, images, idx);
       return;
     }
     await streamReply(text, undefined, true, undefined, images);

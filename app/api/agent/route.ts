@@ -2,7 +2,7 @@ import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { consumeStopped, generateTitle, logRun, setApprovalMode } from "@/lib/agent";
 import { judgeRun } from "@/lib/judge";
-import { setMemoryCtx, setPlanCtx, setSessionWorkdirOverride } from "@/lib/tools";
+import { setMemoryCtx, setPlanCtx, runWithWorkdir } from "@/lib/tools";
 import { rememberMessages } from "@/lib/memory";
 import { createCore } from "@/lib/core";
 import { toImageContents, extractImages } from "@/lib/attachments";
@@ -73,6 +73,7 @@ export async function POST(req: Request) {
     message?: unknown;
     sessionId?: unknown;
     rewindToText?: unknown;
+    rewindToIndex?: unknown;
     approvalMode?: unknown;
     images?: { data?: unknown; mimeType?: unknown }[];
   };
@@ -111,8 +112,32 @@ export async function POST(req: Request) {
     return Response.json({ error: "agent 正在处理上一条消息，请稍候" }, { status: 409 });
   }
 
-  // 重新生成：回退会话历史到指定用户消息（含该条），随后用相同消息重新执行
-  if (typeof body.rewindToText === "string" && body.rewindToText.trim()) {
+  // 重写历史（按索引定位，编辑重发用）：截断到该索引（不含被替换的旧消息），
+  // 随后 prompt 会追加编辑后的新消息。文本匹配只保留给"重新生成"（原文未变）。
+  const rewindToIndex =
+    typeof body.rewindToIndex === "number" && Number.isInteger(body.rewindToIndex)
+      ? body.rewindToIndex
+      : undefined;
+  if (rewindToIndex !== undefined) {
+    const msgs = agent.state.messages;
+    if (rewindToIndex >= 0) {
+      // 前端 UI 消息数组不含 toolResult（toUiMessage 过滤），先把 UI 索引
+      // 映射回全量消息数组的下标，再截断（不含被替换的旧 user 消息）。
+      let ui = 0;
+      let cut = msgs.length;
+      for (let j = 0; j < msgs.length; j++) {
+        const r = msgs[j].role;
+        if (r === "user" || r === "assistant") {
+          if (ui === rewindToIndex) {
+            cut = j;
+            break;
+          }
+          ui++;
+        }
+      }
+      agent.state.messages = msgs.slice(0, cut);
+    }
+  } else if (typeof body.rewindToText === "string" && body.rewindToText.trim()) {
     const t = body.rewindToText.trim();
     const msgs = agent.state.messages;
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -185,12 +210,15 @@ export async function POST(req: Request) {
       const runStartedAt = Date.now();
       // 注入 plan_propose 会话上下文（本轮 prompt 期间有效）
       setPlanCtx({ sessionId: session.id, surface: session.surface ?? "coding" });
-      // 注入会话绑定目录（coding 时文件工具以该目录为根）
-      setSessionWorkdirOverride(session.workdir);
       setMemoryCtx({ workdir: session.workdir });
+      // 在会话绑定工作目录上下文中执行 prompt + 工具调用链；
+      // 使用 AsyncLocalStorage 保证并发请求各自读到自己的工作目录，
+      // 不会因全局变量被其他请求覆盖而在错误的 workdir 下操作文件。
       try {
-        await a.prompt(message, imageContents.length > 0 ? imageContents : undefined);
-        await a.waitForIdle();
+        await runWithWorkdir(session.workdir, async () => {
+          await a.prompt(message, imageContents.length > 0 ? imageContents : undefined);
+          await a.waitForIdle();
+        });
       } catch (err) {
         runError = err;
         // 用户通过 /api/agent/stop 中止：区分"主动停止"与"真实错误"
@@ -280,7 +308,6 @@ export async function POST(req: Request) {
         }
         unsubBus();
         setPlanCtx(undefined);
-        setSessionWorkdirOverride(undefined);
         setMemoryCtx(undefined);
         send(
           stopped

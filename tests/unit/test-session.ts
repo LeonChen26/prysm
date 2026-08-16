@@ -187,6 +187,42 @@ async function main() {
   if (countDeletedRows(sCode.id) !== 5) fail("全量保存不应清掉软删行");
   console.log(`  ✓ 软删、轮次级联、行保留、保存不复活，均正确`);
 
+  console.log("\n== 含 toolResult 时的 UI 索引对齐 ==");
+  const toolMsgs: AgentMessage[] = [
+    mk("user", "调用工具"),
+    mk("assistant", "工具调用中"),
+    {
+      role: "toolResult",
+      toolCallId: "t1",
+      toolName: "read_file",
+      content: [{ type: "text", text: "文件内容" }],
+      isError: false,
+      timestamp: Date.now(),
+    },
+    mk("assistant", "工具结果回复"),
+    mk("user", "第二条提问"),
+    mk("assistant", "第二条回复"),
+  ];
+  saveSessionMessages(sCode.id, toolMsgs);
+  // UI 数组（不含 toolResult）：0 调用工具, 1 工具调用中, 2 工具结果回复, 3 第二条提问, 4 第二条回复
+  // 删除 UI 索引 3（第二条提问）→ 应级联"第二条回复"，toolResult 与"工具结果回复"保留
+  const afterTool = deleteSessionMessage(sCode.id, 3);
+  const toolTexts = afterTool.map((m) => {
+    const c = m.content;
+    if (Array.isArray(c)) return (c[0] as { text?: string })?.text ?? "";
+    return String(c ?? "");
+  });
+  const expectedTool = ["调用工具", "工具调用中", "文件内容", "工具结果回复"];
+  if (toolTexts.length !== expectedTool.length) {
+    fail(`toolResult 场景删除后应为 ${expectedTool.length} 条，实际 ${toolTexts.length}`);
+  }
+  for (let i = 0; i < expectedTool.length; i++) {
+    if (toolTexts[i] !== expectedTool[i]) {
+      fail(`toolResult 场景索引 ${i} 应为 "${expectedTool[i]}"，实际 "${toolTexts[i]}"`);
+    }
+  }
+  console.log(`  ✓ toolResult 轮次中 UI 索引映射正确（删 UI 3 → 剩 ${toolTexts.length} 条）`);
+
   // 重置 sCode 消息以便后续测试
   saveSessionMessages(sCode.id, delMsgs);
 

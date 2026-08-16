@@ -14,7 +14,7 @@ import { setSessionWorkdir } from "./agent-context";
 import {
   setMemoryCtx,
   setPlanCtx,
-  setSessionWorkdirOverride,
+  runWithWorkdir,
 } from "./tools";
 import type { AgentEventBus } from "./events";
 import {
@@ -83,12 +83,15 @@ export async function runAutomationNow(
     }
     // 注入本轮上下文（对齐 app/api/agent/route.ts：plan_propose 归属 / 工作区根 / 记忆工作区）
     setPlanCtx({ sessionId, surface: a.surface });
-    setSessionWorkdirOverride(a.workdir);
     setMemoryCtx({ workdir: a.workdir });
     try {
       const agent = await getAgent(sessionId);
-      await agent.prompt(a.prompt);
-      await agent.waitForIdle();
+      // 在任务绑定工作目录上下文中执行 prompt + 工具调用链；
+      // AsyncLocalStorage 保证并发执行的多任务各自读到自己的工作目录。
+      await runWithWorkdir(a.workdir, async () => {
+        await agent.prompt(a.prompt);
+        await agent.waitForIdle();
+      });
       // 持久化会话消息（全量替换）
       saveSessionMessages(sessionId, agent.state.messages);
     } finally {
