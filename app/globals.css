@@ -1450,20 +1450,42 @@ body.resizing {
   text-decoration: underline;
 }
 
-.error-banner {
+.error-banner,
+.info-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
   padding: 10px 14px;
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
+  animation: banner-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.error-banner {
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
   color: var(--danger);
-  font-size: 13px;
 }
 
 .info-banner {
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 32%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, var(--surface));
   color: var(--success);
-  font-size: 13px;
+}
+
+/* 提示条入场：轻下落淡入 */
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ---------- Input bar ---------- */
@@ -2266,6 +2288,18 @@ body.resizing {
   font-weight: 600;
 }
 
+/* MCP 添加表单：类型切换胶囊 */
+.settings-mcp-types {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.settings-mcp-types .settings-chip {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
 /* ---------- Settings: 分类 Tab 布局 ---------- */
 .settings {
   display: flex;
@@ -2324,6 +2358,30 @@ body.resizing {
   line-height: 1.5;
   color: var(--text-muted);
 }
+.settings-sub-label {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.settings-textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.settings-textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+}
 .settings-msg {
   font-size: 11px;
   line-height: 1.5;
@@ -2335,6 +2393,171 @@ body.resizing {
 .settings-msg-err {
   color: var(--danger);
 }
+
+/* ---------- 定时任务（自动化）面板 ---------- */
+.automation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.automation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.automation-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.automation-actions {
+  display: flex;
+  gap: 6px;
+}
+.automation-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.automation-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.automation-item {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.automation-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.automation-item-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.automation-item-time {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.automation-item-sub {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.automation-item-err {
+  color: var(--danger);
+}
+.automation-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.automation-action {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.automation-action:hover {
+  background: var(--surface-muted);
+  color: var(--brand);
+}
+.automation-action-danger:hover {
+  color: var(--danger);
+}
+.automation-status {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.automation-status-running {
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand);
+}
+.automation-status-done {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+.automation-status-failed {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+.automation-status-skipped,
+.automation-status-idle {
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  color: var(--text-muted);
+}
+.automation-toggle {
+  flex: none;
+  border: none;
+  background: none;
+  font-size: 10px;
+  font-family: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.automation-toggle:hover {
+  color: var(--brand);
+}
+.automation-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+.automation-modal {
+  width: min(420px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.automation-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.automation-modal .settings-input[type="time"] {
+  width: auto;
+}
+
 .settings-section-head {
   display: flex;
   align-items: center;
@@ -2526,11 +2749,136 @@ body.resizing {
   opacity: 0.5;
   cursor: default;
 }
+/* 技能"运行"按钮（悬停用主题色而非危险红） */
+.settings-item-action-run {
+  margin-left: 0;
+}
+.settings-item-action-run:hover {
+  color: var(--brand);
+  border-color: var(--brand);
+}
+/* 技能来源徽标：项目 / 全局 */
+.skill-source-badge {
+  flex: none;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  line-height: 1.5;
+}
+.skill-source-global {
+  color: var(--brand);
+  border-color: var(--brand);
+}
 .settings-hint {
   margin: 6px 0 0;
   font-size: 11px;
   line-height: 1.6;
   color: var(--text-muted);
+}
+/* 权限模式 / 决策方（permission.json） */
+.settings-mode-group {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.settings-mode-group.compact {
+  grid-template-columns: repeat(3, 1fr);
+}
+.settings-mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.settings-mode-btn:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+.settings-mode-btn.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.settings-mode-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.settings-mode-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.settings-mode-btn.active .settings-mode-label {
+  color: var(--brand);
+}
+.settings-mode-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+.settings-scene {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.settings-check input {
+  accent-color: var(--brand);
+}
+.settings-check.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.settings-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.settings-badge.allow {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+.settings-badge.ask {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+.settings-badge.deny {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+.settings-code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--brand);
+  overflow-wrap: anywhere;
+}
+.settings-add .select-auto {
+  flex: none;
+  width: auto;
 }
 /* Phase 7：形态工具集可视化（右侧"工具卡片"面板顶部） */
 .surface-tools {
@@ -4240,16 +4588,19 @@ body.resizing {
 }
 
 /* ---------- Approval dock（对话窗内，输入框上方） ---------- */
+/* 与输入区统一视觉语言：透明背景 + 独立圆角卡片，仅用细分隔线划分消息区 */
 .approval-dock {
   border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 85%, transparent);
-  backdrop-filter: blur(8px);
-  padding: 10px 16px;
-  max-height: 40vh;
+  padding: 8px 24px 10px;
+  max-height: 42vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  /* 与消息气泡/输入框同宽居中：面板折叠（work）时聊天区无宽度上限，避免审批卡被拉得过宽 */
+  max-width: 780px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .approval-batch {
@@ -4258,54 +4609,94 @@ body.resizing {
   gap: 8px;
   font-size: 12px;
   color: var(--text-muted);
+  padding: 0 2px;
 }
 
 .approval-batch button {
-  padding: 3px 12px;
+  padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface);
-  color: var(--text);
+  color: var(--text-secondary);
   font-size: 11px;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .approval-batch button:hover {
   background: var(--surface-muted);
+  color: var(--text);
+}
+
+/* 批量操作按语义着色：全部允许（绿）/ 全部拒绝（红） */
+.approval-batch button.approve-all {
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+  color: var(--success);
+}
+.approval-batch button.approve-all:hover {
+  background: color-mix(in srgb, var(--success) 10%, var(--surface));
+}
+.approval-batch button.deny-all {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+  color: var(--danger);
+}
+.approval-batch button.deny-all:hover {
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
 }
 
 .approval-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .approval-card {
+  --risk-color: var(--warning);
+  position: relative;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  /* 与 composer 输入卡一致：底部卡片体系统一 16px 圆角 */
+  border-radius: 16px;
   background: var(--surface);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: opacity 0.15s ease;
+  transition: box-shadow 0.18s ease, border-color 0.18s ease, opacity 0.15s ease;
+  /* 入场动画：新请求滑入 + 微缩放；交错延迟由 JSX 按索引设置 */
+  animation: approval-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* 风险等级配色：边框 + 左侧色条 */
+/* 审批/计划卡入场动画（弹性的去 overshoot 曲线） */
+@keyframes approval-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 风险等级配色：仅定义点缀色（徽章/圆点），卡片边框保持中性，避免染色边框的廉价感 */
 .approval-card.risk-low {
-  border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+  --risk-color: var(--success);
 }
 .approval-card.risk-medium {
-  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+  --risk-color: var(--warning);
 }
 .approval-card.risk-high {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--warning));
+  --risk-color: color-mix(in srgb, var(--danger) 72%, var(--warning));
 }
 .approval-card.risk-critical {
-  border-color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+  --risk-color: var(--danger);
+}
+
+.approval-card:hover {
+  box-shadow: var(--shadow-lg), 0 6px 20px rgba(0, 0, 0, 0.05);
 }
 
 .approval-deciding {
@@ -4317,32 +4708,52 @@ body.resizing {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+/* 工具类型图标：头部左侧视觉锚点（紧凑 24px） */
+.approval-type-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--surface-muted), color-mix(in srgb, var(--surface-muted) 80%, var(--brand-soft)));
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
 }
 
 .approval-risk {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
-  padding: 3px 6px;
-  border-radius: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
 }
 .approval-risk.risk-low {
-  background: color-mix(in srgb, var(--success) 16%, transparent);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
   color: var(--success);
 }
 .approval-risk.risk-medium {
-  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
   color: var(--warning);
 }
 .approval-risk.risk-high {
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
-  color: color-mix(in srgb, var(--danger) 30%, var(--warning));
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
 }
 .approval-risk.risk-critical {
-  background: color-mix(in srgb, var(--danger) 20%, transparent);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger);
 }
 
@@ -4352,69 +4763,173 @@ body.resizing {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 600;
 }
 
 .approval-countdown {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface-muted);
 }
 .approval-countdown-urgent {
   color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  animation: countdown-pulse 1.2s ease infinite;
+}
+
+@keyframes countdown-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* 尊重系统减弱动效偏好：关闭卡片入场与倒计时脉冲 */
+@media (prefers-reduced-motion: reduce) {
+  .approval-card,
+  .plan-card,
+  .approval-countdown-urgent {
+    animation: none !important;
+  }
+}
+
+.approval-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 与标题行文字左对齐：24px 类型图标 + 8px gap */
+  margin-left: 32px;
 }
 
 .approval-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   font-size: 11px;
-  color: color-mix(in srgb, var(--warning) 20%, var(--text-muted));
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.approval-reason-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--risk-color);
+}
+
+.approval-args-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.approval-args-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
 
 .approval-args {
   margin: 0;
+  padding: 8px 10px;
   font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-muted);
+  line-height: 1.55;
+  color: #d8d8e0;
+  background: #1c1c1e;
+  border: 1px solid color-mix(in srgb, #1c1c1e 80%, var(--border));
+  border-radius: 12px;
   word-break: break-all;
   white-space: pre-wrap;
-  max-height: 120px;
+  max-height: 88px;
   overflow-y: auto;
 }
 
 .approval-actions {
   display: flex;
   gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }
 
 .approval-actions button {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 7px 0;
   border: none;
-  border-radius: var(--radius);
+  border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
+  font-family: inherit;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: transform 0.12s ease, box-shadow 0.15s ease, background 0.15s ease,
+    color 0.15s ease, opacity 0.15s ease;
 }
 
 .approval-actions button:disabled {
   cursor: default;
   opacity: 0.6;
+  transform: none !important;
 }
 
+/* 键盘导航焦点可见性 */
+.approval-actions button:focus-visible,
+.approval-batch button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  outline-offset: 2px;
+}
+
+/* 允许：垂直高光渐变（上亮下深），绿字白底高对比 */
 .btn-approve {
-  background: var(--success);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--success) 90%, #fff),
+    var(--success) 38%,
+    color-mix(in srgb, var(--success) 82%, #000)
+  );
   color: #fff;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--success) 35%, transparent);
 }
 
-.btn-deny {
-  background: var(--surface-muted);
-  color: var(--text);
+/* 拒绝：纯幽灵（透明底 + 弱边框），hover 才浮现危险色，克制且明确 */
+.approval-actions button.btn-deny {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  color: var(--text-secondary);
 }
 
 .approval-actions button:hover:not(:disabled) {
-  opacity: 0.85;
+  transform: translateY(-1px);
+}
+
+/* 按下反馈：轻微回缩，保留触感 */
+.approval-actions button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+.btn-approve:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--success) 40%, transparent);
+}
+
+.approval-actions button.btn-deny:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger);
 }
 
 /* ---------- Plan mode（Phase 7）计划卡片 ---------- */
@@ -4425,12 +4940,18 @@ body.resizing {
 .plan-card {
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 16px;
   background: var(--surface);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, box-shadow 0.18s ease;
+  animation: approval-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.plan-card:hover {
+  box-shadow: var(--shadow-lg), 0 6px 20px rgba(0, 0, 0, 0.05);
 }
 
 .plan-card-resolved {
@@ -4439,13 +4960,17 @@ body.resizing {
 
 .plan-badge {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
-  padding: 3px 6px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand) 13%, transparent);
   color: var(--brand);
+  letter-spacing: 0.02em;
 }
 
 .plan-summary {
@@ -4458,9 +4983,9 @@ body.resizing {
   margin: 0;
   padding-left: 20px;
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.6;
   color: var(--text);
-  max-height: 160px;
+  max-height: 120px;
   overflow-y: auto;
 }
 

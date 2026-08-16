@@ -5,6 +5,9 @@
  *
  * 运行：npx tsx test-fileops.ts
  */
+// 注入临时工作区：必须在 lib/tools / lib/agent 之前 import（ESM 按序求值），
+// 避免测试读取开发库 prysm.db 的工作区状态（项目根若为已授权工作区会导致越界用例失效）。
+import "./_tmp-workdir";
 import { Agent, type AgentEvent } from "@earendil-works/pi-agent-core";
 import { createModels } from "@earendil-works/pi-ai";
 import {

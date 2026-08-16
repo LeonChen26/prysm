@@ -20,6 +20,8 @@ import { TOOL_META } from "@/lib/tool-meta";
 import { DiffView, isDiffText } from "./DiffView";
 import {
   BracesIcon,
+  CheckIcon,
+  ClockIcon,
   CodeBlock,
   DownloadIcon,
   extractFileRefs,
@@ -29,15 +31,20 @@ import {
   PersonIcon,
   PinIcon,
   PinOffIcon,
+  PlanIcon,
   PrismIcon,
+  RiskIcon,
   SparkleIcon,
+  ToolTypeIcon,
   TrashIcon,
   UploadIcon,
   WbChevron,
   WbFileIcon,
   WbFolderIcon,
+  XIcon,
 } from "./chat-blocks";
 import { SettingsPanel } from "./settings-view";
+import AutomationPanel from "./automation-panel";
 import {
   formatApprovalArgs,
   formatDuration,
@@ -546,8 +553,8 @@ export function ChatPanel() {
   >([]);
   /** 右侧面板是否折叠：Work 形态默认收起以专注对话，Coding 形态展开 */
   const [panelCollapsed, setPanelCollapsed] = useState(false);
-  /** 左栏视图：会话列表 / 文件浏览器 / 设置 */
-  const [activityView, setActivityView] = useState<"sessions" | "files" | "settings">("sessions");
+  /** 左栏视图：会话列表 / 文件浏览器 / 自动化 / 设置 */
+  const [activityView, setActivityView] = useState<"sessions" | "files" | "automation" | "settings">("sessions");
   /** 右栏 Tab：工具卡片 / 记忆 / 日志 / 审计 / 上下文 / 评估 */
   const [rightTab, setRightTab] = useState<
     "cards" | "memory" | "logs" | "audit" | "context" | "insights"
@@ -570,9 +577,9 @@ export function ChatPanel() {
   const [modelOpen, setModelOpen] = useState(false);
   /** 输入框审批模式下拉是否展开 */
   const [approvalOpen, setApprovalOpen] = useState(false);
-  /** 审批模式：手动（默认） / 自动（到达即批准） / dangerous（无任何审批，持久化到 localStorage）。
-   *  注意：初始值固定 manual，挂载后再从 localStorage 读取，避免 SSR 水合不一致。 */
-  const [approvalMode, setApprovalMode] = useState<"manual" | "auto" | "dangerous">("manual");
+  /** 审批模式：手动 / 自动（LLM Guardian 决策，拒绝回退用户）/ 完全访问（不审批）/ 自定义（细粒度配置）。
+   *  持久化到 localStorage（服务端写入 permission.json）。初始固定 manual，避免 SSR 水合不一致。 */
+  const [approvalMode, setApprovalMode] = useState<"manual" | "auto" | "full" | "custom">("manual");
   /** 待发送的图片附件（多模态，随消息传给 /api/agent） */
   const [pendingImages, setPendingImages] = useState<
     { id: string; dataUrl: string; mimeType: string; name: string }[]
@@ -610,6 +617,7 @@ export function ChatPanel() {
   /** todo 拖拽：记录被拖动的项 id */
   const todoDragRef = useRef<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
   /** busy 的同步镜像，避免 useCallback 闭包读到过期值 */
   const busyRef = useRef(false);
@@ -1748,15 +1756,41 @@ export function ChatPanel() {
     else void newSession();
   }, [surface, openDirPicker, newSession]);
 
+  /** 设置面板"运行技能"：新建会话并预设技能调用提示词（use_skill 按需加载） */
+  const handleRunSkill = useCallback(
+    (skill: { name: string }) => {
+      void newSession(
+        `请使用技能「${skill.name}」完成任务。请先调用 use_skill 工具加载该技能，再按其说明执行。`,
+      );
+    },
+    [newSession],
+  );
+
+  /** 自动化面板"在对话中创建"：切回会话视图，预填创建提示并聚焦输入框（AI 经 create_automation 工具完成创建） */
+  const handleCreateAutomationInChat = useCallback(() => {
+    setActivityView("sessions");
+    setInput("我想要创建一个定时任务。\n任务内容是：\n执行时间是：");
+    setTimeout(() => chatInputRef.current?.focus(), 60);
+  }, []);
+
+  /** 自动化执行历史跳转：先切到该任务运行形态，再选中对应会话 */
+  const handleJumpAutomationSession = useCallback(
+    (sessionId: string, targetSurface?: "work" | "coding") => {
+      if (targetSurface && targetSurface !== surface) changeSurface(targetSurface);
+      void switchSession(sessionId);
+    },
+    [changeSurface, switchSession, surface],
+  );
+
   /** 发送输入框内容（编辑态时截断并替换目标消息后重发） */
   const send = useCallback(async () => {
-    const text = input.trim();
+    let text = input.trim();
     if (!text) return;
     setInput("");
     // 发送后重置输入框高度为单行
     const ta = document.querySelector<HTMLTextAreaElement>(".chat-input");
     if (ta) ta.style.height = "auto";
-    // 斜杠命令：/new /clear /export /theme /help
+    // 斜杠命令：/new /clear /export /theme /skill /help
     if (text.startsWith("/")) {
       const cmd = text.split(/\s+/)[0].toLowerCase();
       switch (cmd) {
@@ -1772,9 +1806,20 @@ export function ChatPanel() {
         case "/theme":
           toggleTheme();
           return;
+        case "/skill": {
+          const rest = text.slice("/skill".length).trim();
+          const name = rest.split(/\s+/)[0] ?? "";
+          const task = rest.slice(name.length).trim();
+          if (!name) {
+            setInfo("用法：/skill <技能名> [任务描述]");
+            return;
+          }
+          text = `请使用技能「${name}」完成任务${task ? `：${task}` : ""}。请先调用 use_skill 工具加载该技能，再按其说明执行。`;
+          break; // 改写后落到普通消息发送流程
+        }
         case "/help":
           setInfo(
-            "可用命令：/new 新建会话 · /clear 清空当前会话 · /export 导出 Markdown · /theme 切换主题 · /help 帮助",
+            "可用命令：/new 新建会话 · /clear 清空当前会话 · /export 导出 Markdown · /theme 切换主题 · /skill <技能名> 运行技能 · /help 帮助",
           );
           return;
         default:
@@ -2102,28 +2147,31 @@ export function ChatPanel() {
     }
   }, [approvalMode]);
 
-  /** 挂载后读取上次保存的审批模式（仅在客户端执行，避免水合不一致） */
+  /** 挂载后读取上次保存的审批模式（仅在客户端执行，避免水合不一致；兼容历史 dangerous） */
   useEffect(() => {
     try {
       const saved = localStorage.getItem("prysm.approvalMode");
-      if (saved === "auto" || saved === "manual" || saved === "dangerous") setApprovalMode(saved);
+      const legacy = saved === "dangerous" ? "full" : saved;
+      if (legacy === "auto" || legacy === "manual" || legacy === "full" || legacy === "custom") {
+        setApprovalMode(legacy);
+      }
     } catch {
       /* 忽略 */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** 自动/危险审批：审批请求到达即批准 */
+  /** 完全访问模式：审批请求/计划提案到达即批准（auto 由服务端 LLM Guardian 决策，前端不再代批） */
   useEffect(() => {
-    if (approvalMode !== "auto" && approvalMode !== "dangerous") return;
+    if (approvalMode !== "full") return;
     approvals.forEach((item) => {
       if (!item.deciding) void decideApproval(item.id, true);
     });
   }, [approvalMode, approvals, decideApproval]);
 
-  /** 自动/危险审批：计划提案到达即批准执行 */
+  /** 自动/完全访问：计划提案到达即批准执行 */
   useEffect(() => {
-    if (approvalMode !== "auto" && approvalMode !== "dangerous") return;
+    if (approvalMode !== "auto" && approvalMode !== "full") return;
     plans.forEach((p) => {
       if (!p.deciding && typeof p.decided !== "boolean" && !p.cancelled) {
         void decidePlan(p.id, true);
@@ -2539,6 +2587,16 @@ export function ChatPanel() {
             </svg>
           </button>
           <button
+            className={`activity-item ${activityView === "automation" ? "activity-item-active" : ""}`}
+            onClick={() => setActivityView("automation")}
+            title="自动化"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+          </button>
+          <button
             className={`activity-item ${activityView === "settings" ? "activity-item-active" : ""}`}
             onClick={() => setActivityView("settings")}
             title="设置"
@@ -2891,6 +2949,23 @@ export function ChatPanel() {
             </>
           )}
 
+          {/* 自动化（定时任务）视图 */}
+          {activityView === "automation" && (
+            <>
+              <div className="session-head">
+                <span className="session-title">自动化</span>
+              </div>
+              <div className="session-scroll">
+                <AutomationPanel
+                  surface={surface}
+                  onSurfaceChange={changeSurface}
+                  onJumpSession={handleJumpAutomationSession}
+                  onCreateInChat={handleCreateAutomationInChat}
+                />
+              </div>
+            </>
+          )}
+
           {/* Settings view */}
           {activityView === "settings" && (
             <>
@@ -2907,6 +2982,8 @@ export function ChatPanel() {
                   toggleNotify={toggleNotify}
                   onExportBackup={exportBackup}
                   onRestoreBackup={restoreBackup}
+                  onRunSkill={handleRunSkill}
+                  memoryWorkdir={sessions.find((s) => s.id === sessionId)?.workdir}
                 />
               </div>
             </>
@@ -3270,8 +3347,18 @@ export function ChatPanel() {
               );
             });
             })()}
-            {info && <div className="info-banner">{info}</div>}
-            {error && <div className="error-banner">{error}</div>}
+            {info && (
+              <div className="info-banner" role="status">
+                <CheckIcon size={14} />
+                <span>{info}</span>
+              </div>
+            )}
+            {error && (
+              <div className="error-banner" role="alert">
+                <XIcon size={14} />
+                <span>{error}</span>
+              </div>
+            )}
           </div>
 
           {/* 审批请求：固定在对话窗内、输入框上方（不再放右侧栏） */}
@@ -3282,12 +3369,14 @@ export function ChatPanel() {
                   <span>待确认 {approvals.length} 项</span>
                   <button
                     type="button"
+                    className="approve-all"
                     onClick={() => batchDecideApprovals(true)}
                   >
                     全部允许
                   </button>
                   <button
                     type="button"
+                    className="deny-all"
                     onClick={() => batchDecideApprovals(false)}
                   >
                     全部拒绝
@@ -3295,7 +3384,7 @@ export function ChatPanel() {
                 </div>
               )}
               <div className="approval-list">
-                {approvals.map((a) => {
+                {approvals.map((a, i) => {
                   const risk = a.risk ?? "medium";
                   const leftMs = a.expiresAt
                     ? Math.max(0, a.expiresAt - Date.now())
@@ -3308,16 +3397,27 @@ export function ChatPanel() {
                       className={`approval-card risk-${risk} ${
                         a.deciding ? "approval-deciding" : ""
                       }`}
+                      style={{ animationDelay: `${Math.min(i * 60, 300)}ms` }}
                     >
                       <div className="approval-title">
+                        <span
+                          className="approval-type-icon"
+                          title={`${TOOL_META[a.toolName]?.type ?? "工具"}类操作`}
+                        >
+                          <ToolTypeIcon
+                            type={TOOL_META[a.toolName]?.type}
+                            size={15}
+                          />
+                        </span>
+                        <span className="approval-tool">
+                          {TOOL_META[a.toolName]?.label ?? a.toolName}
+                        </span>
                         <span
                           className={`approval-risk risk-${risk}`}
                           title={a.riskReason}
                         >
-                          {RISK_LABELS[risk] ?? risk}
-                        </span>
-                        <span className="approval-tool">
-                          需要确认：{TOOL_META[a.toolName]?.label ?? a.toolName}
+                          <RiskIcon level={risk} size={11} />
+                          {RISK_LABELS[risk] ?? risk}风险
                         </span>
                         {a.expiresAt && (
                           <span
@@ -3325,30 +3425,53 @@ export function ChatPanel() {
                               leftSec <= 10 ? "approval-countdown-urgent" : ""
                             }`}
                           >
+                            <ClockIcon size={11} />
                             {leftSec}s
                           </span>
                         )}
                       </div>
-                      {a.riskReason && (
-                        <div className="approval-reason">{a.riskReason}</div>
-                      )}
-                      <pre className="approval-args">
-                        {formatApprovalArgs(a.toolName, a.args)}
-                      </pre>
+                      <div className="approval-body">
+                        {a.riskReason && (
+                          <div className="approval-reason">
+                            <span className="approval-reason-dot" />
+                            {a.riskReason}
+                          </div>
+                        )}
+                        <div className="approval-args-block">
+                          <span className="approval-args-label">参数</span>
+                          <pre className="approval-args">
+                            {formatApprovalArgs(a.toolName, a.args)}
+                          </pre>
+                        </div>
+                      </div>
                       <div className="approval-actions">
                         <button
                           className="btn-approve"
                           disabled={a.deciding}
                           onClick={() => decideApproval(a.id, true)}
                         >
-                          {a.deciding ? "处理中…" : "允许"}
+                          {a.deciding ? (
+                            "处理中…"
+                          ) : (
+                            <>
+                              <CheckIcon size={13} />
+                              允许
+                            </>
+                          )}
                         </button>
                         <button
                           className="btn-deny"
                           disabled={a.deciding}
                           onClick={() => decideApproval(a.id, false)}
                         >
-                          {a.deciding ? "处理中…" : "拒绝"}
+                          {a.deciding ? (
+                            "处理中…"
+                          ) : (
+                            <>
+                              <XIcon size={13} />
+                              拒绝
+                            </>
+                          )}
                         </button>
                       </div>
                     </div>
@@ -3362,7 +3485,7 @@ export function ChatPanel() {
           {plans.length > 0 && (
             <div className="approval-dock plan-dock">
               <div className="approval-list">
-                {plans.map((p) => {
+                {plans.map((p, i) => {
                   const leftMs = p.expiresAt
                     ? Math.max(0, p.expiresAt - Date.now())
                     : 0;
@@ -3376,9 +3499,13 @@ export function ChatPanel() {
                       className={`plan-card ${p.deciding ? "approval-deciding" : ""} ${
                         resolved ? "plan-card-resolved" : ""
                       }`}
+                      style={{ animationDelay: `${Math.min(i * 60, 300)}ms` }}
                     >
                       <div className="approval-title">
-                        <span className="plan-badge">计划</span>
+                        <span className="plan-badge">
+                          <PlanIcon size={11} />
+                          计划
+                        </span>
                         <span className="approval-tool">
                           {p.surface ? `形态度量：${p.surface}` : "待确认计划"}
                         </span>
@@ -3388,6 +3515,7 @@ export function ChatPanel() {
                               leftSec <= 10 ? "approval-countdown-urgent" : ""
                             }`}
                           >
+                            <ClockIcon size={11} />
                             {leftSec}s
                           </span>
                         )}
@@ -3428,14 +3556,28 @@ export function ChatPanel() {
                             disabled={p.deciding}
                             onClick={() => decidePlan(p.id, true)}
                           >
-                            {p.deciding ? "处理中…" : "批准执行"}
+                            {p.deciding ? (
+                              "处理中…"
+                            ) : (
+                              <>
+                                <CheckIcon size={13} />
+                                批准执行
+                              </>
+                            )}
                           </button>
                           <button
                             className="btn-deny"
                             disabled={p.deciding}
                             onClick={() => decidePlan(p.id, false)}
                           >
-                            {p.deciding ? "处理中…" : "拒绝"}
+                            {p.deciding ? (
+                              "处理中…"
+                            ) : (
+                              <>
+                                <XIcon size={13} />
+                                拒绝
+                              </>
+                            )}
                           </button>
                         </div>
                       )}
@@ -3466,6 +3608,7 @@ export function ChatPanel() {
               <div className="composer-body">
                 <textarea
                   className="chat-input"
+                  ref={chatInputRef}
                   value={input}
                   onChange={(e) => {
                     setInput(e.target.value);
@@ -3520,11 +3663,11 @@ export function ChatPanel() {
                   <div className="toolbar-dropdown">
                     <button
                       type="button"
-                      className={`toolbar-dropdown-btn${approvalMode === "auto" ? " auto" : ""}${approvalMode === "dangerous" ? " dangerous" : ""}`}
+                      className={`toolbar-dropdown-btn${approvalMode === "auto" || approvalMode === "custom" ? " auto" : ""}${approvalMode === "full" ? " dangerous" : ""}`}
                       onClick={() => setApprovalOpen((v) => !v)}
-                      title={approvalMode === "auto" ? "自动审批" : approvalMode === "dangerous" ? "危险模式（无审批）" : "手动审批"}
+                      title={approvalMode === "auto" ? "自动审批（LLM Guardian 决策）" : approvalMode === "full" ? "完全访问（不审批）" : approvalMode === "custom" ? "自定义审批" : "手动审批"}
                     >
-                      {approvalMode === "dangerous" ? (
+                      {approvalMode === "full" ? (
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M12 9v4" />
                           <path d="M12 17h.01" />
@@ -3535,7 +3678,7 @@ export function ChatPanel() {
                           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                         </svg>
                       )}
-                      <span>{approvalMode === "auto" ? "自动审批" : approvalMode === "dangerous" ? "危险模式" : "手动审批"}</span>
+                      <span>{approvalMode === "auto" ? "自动审批" : approvalMode === "full" ? "完全访问" : approvalMode === "custom" ? "自定义" : "手动审批"}</span>
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M6 9l6 6 6-6" />
                       </svg>
@@ -3564,20 +3707,39 @@ export function ChatPanel() {
                               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                             </svg>
                             自动审批
-                            <span className="toolbar-dropdown-hint">到达即批准</span>
+                            <span className="toolbar-dropdown-hint">LLM Guardian 决策</span>
                           </button>
                           <button
                             type="button"
-                            className={`toolbar-dropdown-item${approvalMode === "dangerous" ? " active" : ""}`}
-                            onClick={() => { setApprovalMode("dangerous"); setApprovalOpen(false); }}
+                            className={`toolbar-dropdown-item${approvalMode === "full" ? " active" : ""}`}
+                            onClick={() => { setApprovalMode("full"); setApprovalOpen(false); }}
                           >
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M12 9v4" />
                               <path d="M12 17h.01" />
                               <path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
                             </svg>
-                            危险模式
+                            完全访问
                             <span className="toolbar-dropdown-hint">无需任何审批</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`toolbar-dropdown-item${approvalMode === "custom" ? " active" : ""}`}
+                            onClick={() => { setApprovalMode("custom"); setApprovalOpen(false); }}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M4 21v-7" />
+                              <path d="M4 10V3" />
+                              <path d="M12 21v-9" />
+                              <path d="M12 8V3" />
+                              <path d="M20 21v-5" />
+                              <path d="M20 12V3" />
+                              <path d="M1 14h6" />
+                              <path d="M9 8h6" />
+                              <path d="M17 16h6" />
+                            </svg>
+                            自定义
+                            <span className="toolbar-dropdown-hint">细粒度配置</span>
                           </button>
                         </div>
                       </>
@@ -3699,11 +3861,13 @@ export function ChatPanel() {
           </form>
         </section>
 
-        <div
-          className="drag-handle drag-right"
-          onMouseDown={startResize("mid")}
-          aria-hidden="true"
-        />
+        {!panelCollapsed && (
+          <div
+            className="drag-handle drag-right"
+            onMouseDown={startResize("mid")}
+            aria-hidden="true"
+          />
+        )}
         <aside className="panel" style={{ display: panelCollapsed ? "none" : "flex" }}>
           <div className="panel-tabs">
             <button

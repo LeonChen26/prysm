@@ -11,7 +11,8 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 import { buildSystemPrompt } from "./agent";
-import { buildSkillPrompt } from "./skills";
+import { buildSkillIndex } from "./skills";
+import { buildPreferencePrompt } from "./preference-memory";
 import {
   countEpisodes,
   memoryRecallK,
@@ -126,8 +127,9 @@ export function analyzeContext(sessionId: string): ContextAnalysis {
 
   // 1. system prompt（估算）：与 getAgent 的装配方式一致
   const basePrompt = buildSystemPrompt(getAllowedRoots(), surface);
-  const skillPrompt = buildSkillPrompt();
-  const systemText = skillPrompt ? `${basePrompt}\n\n${skillPrompt}` : basePrompt;
+  const skillIndex = buildSkillIndex();
+  const prefMemory = buildPreferencePrompt(getSession(sessionId)?.workdir);
+  const systemText = [basePrompt, skillIndex, prefMemory].filter(Boolean).join("\n\n");
   acc.system.chars = systemText.length;
   acc.system.estimatedTokens = estimateTokens(systemText);
   acc.system.count = 1;

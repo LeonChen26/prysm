@@ -26,7 +26,7 @@ const prysm = {
   // 计划
   listPendingPlans: () => ipcRenderer.invoke("prysm:listPendingPlans"),
   decidePlan: (id: string, ok: boolean) => ipcRenderer.invoke("prysm:decidePlan", id, ok),
-  // 工作区 / 技能 / 策略 / 日志 / 路由
+  // 工作区 / 技能 / 日志 / 路由
   listWorkspaces: () => ipcRenderer.invoke("prysm:listWorkspaces"),
   addWorkspace: (root: string, name?: string) =>
     ipcRenderer.invoke("prysm:addWorkspace", root, name),
@@ -36,10 +36,8 @@ const prysm = {
   listSkills: () => ipcRenderer.invoke("prysm:listSkills"),
   enableSkill: (name: string) => ipcRenderer.invoke("prysm:enableSkill", name),
   disableSkill: (name: string) => ipcRenderer.invoke("prysm:disableSkill", name),
-  listPolicyRules: () => ipcRenderer.invoke("prysm:listPolicyRules"),
-  addPolicyRule: (kind: string, value: string) =>
-    ipcRenderer.invoke("prysm:addPolicyRule", kind, value),
-  removePolicyRule: (id: number) => ipcRenderer.invoke("prysm:removePolicyRule", id),
+  // 在系统文件管理器中定位文件（权限配置文件）
+  openPath: (p: string) => ipcRenderer.invoke("prysm:openPath", p),
   listRunLogs: () => ipcRenderer.invoke("prysm:listRunLogs"),
   listModelRoutes: () => ipcRenderer.invoke("prysm:listModelRoutes"),
   setModelRoute: (role: string, provider: string, model: string) =>

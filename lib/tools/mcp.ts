@@ -1,5 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type {
   CallToolResult,
   ListToolsResult,
@@ -14,19 +16,26 @@ import { Type, type TSchema } from "typebox";
 import fs from "node:fs";
 import path from "node:path";
 import { basePath } from "../config";
+import { listSessions } from "../session";
+import { getDefaultWorkspaceRoot } from "../workspace";
 import type { ToolProvider } from "./registry";
 
 /**
- * MCP 客户端池与工具 provider（Phase 3，stdio 先行）
+ * MCP 客户端池与工具 provider（Phase 3，stdio 先行 + 远程 HTTP/SSE）
  * 接入 MCP 三类能力：
  * - tools     —— 映射为 AgentTool（mcp__<server>__<tool>），经 registry 进入 Agent 工具集
  * - resources —— McpClientPool.readResource / listResources 暴露，供 API / 上下文注入
  * - prompts   —— McpClientPool.getPrompt / listPrompts 暴露
  *
+ * 服务器形态（对齐 Trae Work MCP 配置）：
+ * - stdio：本地子进程（command/args/env），支持 ${workspaceFolder} 变量替换
+ * - http / sse：远程 server（url/headers），streamable HTTP 或 SSE 传输
+ * - 超时：START_MCP_TIMEOUT_MS（连接）/ RUN_MCP_TIMEOUT_MS（工具调用），stdio 走 env、远程走 headers
+ *
  * 降级策略：server 崩溃 / 连接超时 → 该 server 标记 error，其工具从工具集剔除，
  * 调用返回明确错误提示而非整体卡死；下次 load/call 时尝试自动重连。
  *
- * 注意：本模块只依赖 pi-agent-core / Node 内置 / MCP SDK，不依赖 Next.js。
+ * 注意：本模块只依赖 pi-agent-core / Node 内置 / MCP SDK / session 与 workspace 元数据，不依赖 Next.js。
  */
 
 // ---------------------------------------------------------------- 配置
@@ -54,6 +63,74 @@ export interface McpConfigFile {
 
 function isStdio(o: McpServerOptions): o is McpStdioServer {
   return typeof (o as McpStdioServer).command === "string";
+}
+
+// ------------------------------------------------------ 配置辅助（对齐 Trae Work）
+
+/** 超时配置：连接（START_MCP_TIMEOUT_MS）与工具调用（RUN_MCP_TIMEOUT_MS），单位 ms */
+export interface McpTimeouts {
+  connect: number;
+  run: number;
+}
+
+const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+const DEFAULT_RUN_TIMEOUT_MS = 60_000;
+
+/** stdio 走 env、远程走 headers 读超时；这两个键不随 env/请求头透传给对端 */
+const TIMEOUT_KEYS = ["START_MCP_TIMEOUT_MS", "RUN_MCP_TIMEOUT_MS"] as const;
+
+function parseTimeoutMs(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** 从配置读取超时（stdio 取 env、远程取 headers），缺失时回退默认值 */
+export function resolveTimeouts(options: McpServerOptions): McpTimeouts {
+  const src = isStdio(options) ? options.env : (options as McpRemoteServer).headers;
+  return {
+    connect: parseTimeoutMs(src?.["START_MCP_TIMEOUT_MS"]) ?? DEFAULT_CONNECT_TIMEOUT_MS,
+    run: parseTimeoutMs(src?.["RUN_MCP_TIMEOUT_MS"]) ?? DEFAULT_RUN_TIMEOUT_MS,
+  };
+}
+
+/** 剔除超时键，避免把客户端超时配置泄露给子进程/远程服务 */
+function stripTimeoutKeys(
+  kv: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!kv) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(kv)) {
+    if (!(TIMEOUT_KEYS as readonly string[]).includes(k)) out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * 解析 ${workspaceFolder}：优先最近活跃会话的绑定目录，回退默认工作区根（agent-workdir）。
+ * 与 Trae Work「启动时替换为当前项目根目录」语义一致。
+ */
+export function resolveWorkspaceFolder(): string {
+  try {
+    const latest = listSessions()[0];
+    if (latest?.workdir) return latest.workdir;
+  } catch {
+    /* 会话库不可用（单测等）→ 回退默认工作区 */
+  }
+  return getDefaultWorkspaceRoot();
+}
+
+/** 字符串中的 ${workspaceFolder} 占位替换 */
+export function applyWorkspaceFolder(value: string | undefined): string | undefined {
+  if (!value || !value.includes("${workspaceFolder}")) return value;
+  return value.replaceAll("${workspaceFolder}", resolveWorkspaceFolder());
+}
+
+/** 参数列表逐项做 ${workspaceFolder} 替换 */
+export function applyWorkspaceFolderList(
+  values: string[] | undefined,
+): string[] | undefined {
+  if (!values) return undefined;
+  return values.map((v) => applyWorkspaceFolder(v)!);
 }
 
 /**
@@ -208,8 +285,6 @@ interface McpServerHandle {
   prompts: Prompt[];
 }
 
-const CONNECT_TIMEOUT_MS = 15_000;
-
 export class McpClientPool {
   private handles = new Map<string, McpServerHandle>();
   private initialized = false;
@@ -220,10 +295,10 @@ export class McpClientPool {
     const client = new Client({ name: `prysm-${name}`, version: "0.1.0" });
     if (isStdio(options)) {
       const transport = new StdioClientTransport({
-        command: options.command,
-        args: options.args,
-        env: options.env,
-        cwd: options.cwd,
+        command: applyWorkspaceFolder(options.command)!,
+        args: applyWorkspaceFolderList(options.args),
+        env: stripTimeoutKeys(options.env),
+        cwd: applyWorkspaceFolder(options.cwd),
         stderr: "pipe",
       });
       // 捕获子进程 stderr 供排障
@@ -236,8 +311,21 @@ export class McpClientPool {
       transport.onerror = (err) => this.markError(name, err.message);
       await client.connect(transport);
     } else {
-      const url = (options as McpRemoteServer).url;
-      throw new Error(`远程 MCP server "${name}"（${url}）暂未支持：Phase 3 仅支持 stdio，streamable HTTP/SSE 后补`);
+      const remote = options as McpRemoteServer;
+      const url = remote.url?.trim();
+      if (!url) {
+        throw new Error(`远程 MCP server "${name}" 配置缺少 url`);
+      }
+      const headers = stripTimeoutKeys(remote.headers);
+      const requestInit = headers ? { headers } : undefined;
+      // streamable HTTP（默认）与 SSE 双传输；headers 携带鉴权（如 Authorization: Bearer xxx）
+      const transport =
+        remote.transport === "sse"
+          ? new SSEClientTransport(new URL(url), requestInit ? { requestInit } : undefined)
+          : new StreamableHTTPClientTransport(new URL(url), requestInit ? { requestInit } : undefined);
+      transport.onclose = () => this.markError(name, "连接已关闭");
+      transport.onerror = (err) => this.markError(name, err.message);
+      await client.connect(transport);
     }
     return client;
   }
@@ -264,8 +352,13 @@ export class McpClientPool {
     this.handles.set(name, h);
     try {
       const client = await this.createClient(name, options);
-      // connect 是异步的：用 ping 等待初始化完成（带超时）
-      await withTimeout(client.ping(), CONNECT_TIMEOUT_MS, `连接超时（${CONNECT_TIMEOUT_MS / 1000}s）`);
+      // connect 是异步的：用 ping 等待初始化完成（带超时，可用 START_MCP_TIMEOUT_MS 覆盖）
+      const { connect } = resolveTimeouts(options);
+      await withTimeout(
+        client.ping(),
+        connect,
+        `连接超时（${connect / 1000}s，可用 START_MCP_TIMEOUT_MS 调整）`,
+      );
       h.client = client;
       const [toolsR, resourcesR, promptsR] = await Promise.allSettled([
         client.listTools(),
@@ -361,7 +454,7 @@ export class McpClientPool {
     return h.tools;
   }
 
-  /** 调用某 server 的某个工具（含按需重连） */
+  /** 调用某 server 的某个工具（含按需重连；RUN_MCP_TIMEOUT_MS 控制调用超时） */
   async callTool(
     server: string,
     toolName: string,
@@ -369,7 +462,12 @@ export class McpClientPool {
   ): Promise<CallToolResult> {
     const h = await this.ensureConnected(server);
     if (!h.client) throw new Error(`MCP server "${server}" 无可用连接`);
-    const res = await h.client.callTool({ name: toolName, arguments: args });
+    const { run } = resolveTimeouts(h.options);
+    const res = await withTimeout(
+      h.client.callTool({ name: toolName, arguments: args }),
+      run,
+      `MCP 工具 ${server}::${toolName} 调用超时（${run / 1000}s，可用 RUN_MCP_TIMEOUT_MS 调整）`,
+    );
     return res as CallToolResult;
   }
 
@@ -377,7 +475,13 @@ export class McpClientPool {
   async readResource(server: string, uri: string): Promise<ReadResourceResult> {
     const h = await this.ensureConnected(server);
     if (!h.client) throw new Error(`MCP server "${server}" 无可用连接`);
-    return h.client.readResource({ uri });
+    const { run } = resolveTimeouts(h.options);
+    const res = await withTimeout(
+      h.client.readResource({ uri }),
+      run,
+      `MCP 资源读取超时（${run / 1000}s）`,
+    );
+    return res as ReadResourceResult;
   }
 
   /** 列出某 server 的资源 */
@@ -394,7 +498,13 @@ export class McpClientPool {
   ): Promise<GetPromptResult> {
     const h = await this.ensureConnected(server);
     if (!h.client) throw new Error(`MCP server "${server}" 无可用连接`);
-    return h.client.getPrompt({ name, arguments: args });
+    const { run } = resolveTimeouts(h.options);
+    const res = await withTimeout(
+      h.client.getPrompt({ name, arguments: args }),
+      run,
+      `MCP prompt 获取超时（${run / 1000}s）`,
+    );
+    return res as GetPromptResult;
   }
 
   /** 列出某 server 的 prompts */

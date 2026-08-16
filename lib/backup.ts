@@ -15,7 +15,16 @@ import {
   restoreEpisodes,
   type MemoryEpisode,
 } from "./memory";
+import {
+  dumpPreferenceMemory,
+  restorePreferenceMemory,
+} from "./preference-memory";
 import { exportTodos, importTodos, type TodoItem } from "./todo";
+import {
+  dumpAutomations,
+  restoreAutomations,
+  type Automation,
+} from "./automation";
 
 export interface BackupFile {
   /** 备份格式版本（当前 1） */
@@ -24,7 +33,14 @@ export interface BackupFile {
   sessions: SessionInfo[];
   messagesBySession: Record<string, AgentMessage[]>;
   memory: MemoryEpisode[];
+  /** 偏好记忆（全局 + 各工作区项目 markdown 文件） */
+  preferenceMemory?: {
+    global: string;
+    projects: Record<string, string>;
+  };
   todos: TodoItem[];
+  /** 定时任务配置（不含执行历史） */
+  automations?: Automation[];
 }
 
 /** 导出全部数据为备份对象 */
@@ -36,7 +52,9 @@ export function exportBackup(): BackupFile {
     sessions,
     messagesBySession,
     memory: dumpEpisodes(),
+    preferenceMemory: dumpPreferenceMemory(),
     todos: exportTodos(),
+    automations: dumpAutomations(),
   };
 }
 
@@ -45,6 +63,10 @@ export interface RestoreStats {
   messages: number;
   memory: number;
   todos: number;
+  /** 偏好记忆：全局 1 份 + 项目 N 份 */
+  preferenceFiles: number;
+  /** 恢复的定时任务数 */
+  automations: number;
 }
 
 /** 校验并导入备份（清空重建），返回各类数据条数 */
@@ -63,15 +85,24 @@ export function importBackup(data: unknown): RestoreStats {
   );
   const memory = Array.isArray(b.memory) ? b.memory : [];
   const todos = Array.isArray(b.todos) ? b.todos : [];
+  const automations = Array.isArray(b.automations) ? b.automations : [];
+  const preferenceMemory = b.preferenceMemory;
+  const preferenceFiles =
+    (typeof preferenceMemory?.global === "string" ? 1 : 0) +
+    Object.keys(preferenceMemory?.projects ?? {}).length;
 
   restoreAllSessions(b.sessions, messagesBySession);
   restoreEpisodes(memory);
+  if (preferenceMemory) restorePreferenceMemory(preferenceMemory);
   importTodos(todos);
+  const automationCount = restoreAutomations(automations);
 
   return {
     sessions: b.sessions.length,
     messages: messageCount,
     memory: memory.length,
     todos: todos.length,
+    preferenceFiles,
+    automations: automationCount,
   };
 }

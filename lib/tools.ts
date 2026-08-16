@@ -10,6 +10,15 @@ import { TOOL_META } from "./tool-meta";
 import type { SubagentSpec } from "./subagent";
 import { proposePlan } from "./plan";
 import type { Surface } from "./session";
+import { enabledSkillNames, getSkillByName, isSkillEnabled } from "./skills";
+import {
+  listPreferenceEntries,
+  removePreference,
+  upsertPreference,
+  type MemoryScope,
+} from "./preference-memory";
+import { createAutomation } from "./automation";
+import { parseCron } from "./cron";
 
 // re-export 兼容历史导入（测试脚本从 lib/tools 引入 AGENT_WORKDIR）
 export { AGENT_WORKDIR, ALLOWED_ROOTS } from "./paths";
@@ -32,6 +41,18 @@ export function setSpawnSubagentImpl(fn: SpawnSubagentImpl | undefined): void {
 let planCtx: { sessionId: string; surface: Surface } | undefined;
 export function setPlanCtx(ctx: { sessionId: string; surface: Surface } | undefined): void {
   planCtx = ctx;
+}
+
+/**
+ * 偏好记忆工具的会话上下文（Phase：延迟注入，agent route 在提示前设置当前会话 workdir）。
+ * 记忆工具（remember_memory / forget_memory）据此确定项目记忆归属的工作区。
+ */
+let memoryCtx: { workdir?: string } | undefined;
+export function setMemoryCtx(ctx: { workdir?: string } | undefined): void {
+  memoryCtx = ctx;
+}
+export function getMemoryCtx(): { workdir?: string } | undefined {
+  return memoryCtx;
 }
 
 /** 会话级工作目录覆盖（绑定目录 > 全局默认 AGENT_WORKDIR） */
@@ -342,6 +363,13 @@ interface ToolArgs {
   new_string?: string;
   updates?: TodoUpdate[];
   append?: { title: string; detail?: string }[];
+  name: string;
+  instructions?: string;
+  scope?: MemoryScope;
+  prompt?: string;
+  schedule_desc?: string;
+  interval_minutes?: number;
+  cron_expr?: string;
 }
 
 export const tools: AgentTool<any>[] = [
@@ -1077,6 +1105,182 @@ export const tools: AgentTool<any>[] = [
           },
         ],
         details: { planId: plan.id, approved: false, reason: plan.reason },
+      };
+    },
+  },
+  {
+    name: "use_skill",
+    label: TOOL_META["use_skill"].label,
+    description:
+      "加载并激活一个已启用的技能：返回该技能的完整指令正文，供你按技能要求完成任务。当任务与系统提示词中某个可用技能的描述高度相关时调用。若技能声明了关联资源（examples/templates/resources 等），其相对路径引用均相对技能所在目录解析。",
+    parameters: Type.Object({
+      name: Type.String({ description: "技能名称（取自系统提示词中的可用技能列表）" }),
+      instructions: Type.Optional(
+        Type.String({ description: "本次任务中需要该技能重点处理的内容（可选）" }),
+      ),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs & { name: string; instructions?: string };
+      const s = getSkillByName(params.name);
+      if (!s || !isSkillEnabled(s.name)) {
+        const available = enabledSkillNames();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `技能 "${params.name}" 不存在或未启用。${available.length > 0 ? `可用技能：${available.join("、")}` : "当前没有可用技能，请先在设置中启用或创建技能。"}`,
+            },
+          ],
+          details: { found: false, name: params.name, available },
+        };
+      }
+      const parts: string[] = [`【技能 ${s.name}】`];
+      if (s.description) parts.push(`说明：${s.description}`);
+      parts.push(`指令（正文位于 ${s.path}，其中相对路径引用均相对该目录解析）：\n${s.body}`);
+      if (params.instructions) parts.push(`本次任务重点：${params.instructions}`);
+      const text = parts.join("\n");
+      return {
+        content: [{ type: "text", text }],
+        details: { name: s.name, source: s.source, path: s.path, chars: text.length },
+      };
+    },
+  },
+  {
+    name: "remember_memory",
+    label: TOOL_META["remember_memory"].label,
+    description:
+      "把对后续协作有价值的偏好或规则保存到长期记忆（markdown 文件），跨会话持续生效。当用户明确要求记住某事（如“记住我偏好用中文回答”“以后叫我 David”）时调用；也可用于更新已有记忆（追加相同主题的新表述）。scope 缺省为 project（当前工作区），全局偏好请显式传 global。",
+    parameters: Type.Object({
+      content: Type.String({
+        description: "要记住的偏好/规则内容，一句话一条；多行则逐行保存",
+      }),
+      scope: Type.Optional(
+        Type.Union(
+          [Type.Literal("global"), Type.Literal("project")],
+          { description: "记忆作用域：global 全局生效 / project 仅当前工作区生效，默认 project" },
+        ),
+      ),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs & { content: string; scope?: MemoryScope };
+      const scope = params.scope === "global" ? "global" : "project";
+      const workdir = memoryCtx?.workdir;
+      const added = upsertPreference(scope, params.content ?? "", workdir);
+      const entries = listPreferenceEntries(scope, workdir);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              added > 0
+                ? `已保存 ${added} 条到${scope === "global" ? "全局" : "项目（当前工作区）"}记忆。当前共 ${entries.length} 条。`
+                : `记忆已存在（未新增）。当前${scope === "global" ? "全局" : "项目"}记忆共 ${entries.length} 条。`,
+          },
+        ],
+        details: { scope, added, total: entries.length },
+      };
+    },
+  },
+  {
+    name: "forget_memory",
+    label: TOOL_META["forget_memory"].label,
+    description:
+      "从长期记忆中删除包含指定关键词的记忆条目。当用户明确要求删除/忘掉某条偏好（如“删除关于我偏好的称呼的记忆”）时调用。返回删除条数；未命中则返回 0。",
+    parameters: Type.Object({
+      content: Type.String({
+        description: "要删除的记忆关键词（删除所有包含该关键词的条目）",
+      }),
+      scope: Type.Optional(
+        Type.Union(
+          [Type.Literal("global"), Type.Literal("project")],
+          { description: "记忆作用域：global 全局生效 / project 仅当前工作区生效，默认 project" },
+        ),
+      ),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs & { content: string; scope?: MemoryScope };
+      const scope = params.scope === "global" ? "global" : "project";
+      const workdir = memoryCtx?.workdir;
+      const removed = removePreference(scope, params.content ?? "", workdir);
+      const entries = listPreferenceEntries(scope, workdir);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              removed > 0
+                ? `已从${scope === "global" ? "全局" : "项目"}记忆删除 ${removed} 条。剩余 ${entries.length} 条。`
+                : `未找到包含「${(params.content ?? "").trim()}」的记忆条目（当前 ${scope === "global" ? "全局" : "项目"}记忆共 ${entries.length} 条）。`,
+          },
+        ],
+        details: { scope, removed, total: entries.length },
+      };
+    },
+  },
+  {
+    name: "create_automation",
+    label: TOOL_META["create_automation"].label,
+    description:
+      "把用户口头描述的周期性任务固化为定时任务（自动化）。当用户要求按固定时间或固定间隔自动执行某任务（如“每天早上9点生成日报”“每30分钟抓取一次行情”“每周一上午发周报”）时调用。需要把自然语言触发解析为结构化参数：interval_minutes（间隔多少分钟执行一次）或 cron_expr（标准 5 字段 cron：分 时 日 月 周，如每天9点=0 9 * * *，每周一9点=0 9 * * 1）。运行形态与当前会话一致（work/coding），创建后不可修改。创建成功后任务到点会自动执行并把结果存入新会话。",
+    parameters: Type.Object({
+      name: Type.String({ description: "任务名称（简短，如“每日行情摘要”）" }),
+      prompt: Type.String({ description: "任务内容：到点自动执行时发给 AI 的完整指令" }),
+      schedule_desc: Type.String({ description: "触发方式的人类可读描述（如“每天早上9点”“每30分钟”）" }),
+      interval_minutes: Type.Optional(
+        Type.Integer({ description: "间隔触发：每隔多少分钟执行一次（如 30、60、1440=每天）" }),
+      ),
+      cron_expr: Type.Optional(
+        Type.String({ description: "固定时间触发：标准 5 字段 cron（分 时 日 月 周）" }),
+      ),
+    }),
+    execute: async (_toolCallId, _params) => {
+      const params = _params as ToolArgs & {
+        name: string;
+        prompt: string;
+        schedule_desc: string;
+        interval_minutes?: number;
+        cron_expr?: string;
+      };
+      const hasInterval =
+        typeof params.interval_minutes === "number" && params.interval_minutes > 0;
+      const hasCron =
+        typeof params.cron_expr === "string" && params.cron_expr.trim().length > 0;
+      if (!hasInterval && !hasCron) {
+        throw new Error(
+          "缺少触发方式：请提供 interval_minutes（间隔分钟）或 cron_expr（5 字段 cron）之一。",
+        );
+      }
+      if (hasCron) {
+        try {
+          parseCron(params.cron_expr!);
+        } catch (err) {
+          throw new Error(`cron 表达式非法：${(err as Error).message}`);
+        }
+      }
+      if (!params.name?.trim()) throw new Error("任务名称不能为空");
+      if (!params.prompt?.trim()) throw new Error("任务内容（prompt）不能为空");
+      if (!params.schedule_desc?.trim()) throw new Error("触发描述（schedule_desc）不能为空");
+      const a = createAutomation({
+        name: params.name,
+        prompt: params.prompt,
+        surface: planCtx?.surface ?? "coding",
+        workdir: getSessionWorkdirOverride(),
+        scheduleType: hasInterval ? "interval" : "cron",
+        intervalMinutes: hasInterval ? params.interval_minutes : undefined,
+        cronExpr: hasCron ? params.cron_expr!.trim() : undefined,
+        scheduleDesc: params.schedule_desc,
+      });
+      const next = a.nextRunAt
+        ? new Date(a.nextRunAt).toLocaleString("zh-CN", { hour12: false })
+        : "未知";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `已创建定时任务「${a.name}」\n- 触发：${a.scheduleDesc}\n- 下次执行：${next}\n- 运行形态：${a.surface}\n到点后会自动执行并把结果存入新会话（可在左侧「自动化」面板管理/查看执行历史）。`,
+          },
+        ],
+        details: { id: a.id, name: a.name, nextRunAt: a.nextRunAt, scheduleDesc: a.scheduleDesc },
       };
     },
   },

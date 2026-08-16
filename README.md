@@ -243,9 +243,8 @@ pm2 start .next/standalone/server.js --name prysm
 | `GET /api/mcp` | MCP 连接状态与工具清单 |
 | `GET /api/skills` | 全部已登记技能（含 enabled 状态） |
 | `POST /api/skills` | 启用 / 禁用 / 重载技能（`{ name, action }`） |
-| `GET /api/policy` | 全部策略规则（白黑名单 + 审批超时） |
-| `POST /api/policy` | 新增策略规则（`{ kind, value }`） |
-| `DELETE /api/policy?id=xxx` | 删除策略规则 |
+| `GET /api/permission` | 权限与审批配置（permission.json）及配置文件路径 |
+| `POST /api/permission` | 保存完整配置（`{ config }`）或切换模式（`{ activeMode }`） |
 | `GET /api/plans?sessionId=xxx&id=yyy` | 未决计划列表 / 单个计划（Plan mode） |
 | `POST /api/plans` | 计划决定（`{ id, action: "approve"\|"reject"\|"cancel" }`） |
 | `GET /api/rag?q=xxx&limit=20` | 知识库检索；无 `q` 时返回索引概览 |
@@ -264,13 +263,6 @@ pm2 start .next/standalone/server.js --name prysm
 | `GOOGLE_API_KEY` | - | Google Key |
 | `MAX_CONTEXT_TOKENS` | `50000` | 累计 token 超过该值时摘要化最早对话 |
 | `KEEP_RECENT_MESSAGES` | `8` | 压缩时保留的最近消息条数 |
-| `APPROVAL_TIMEOUT_MS` | `120000` | 敏感工具等待审批的超时毫秒数，超时视为拒绝 |
-| `APPROVAL_ALLOW_TOOLS` | 空 | 免审批工具名白名单（逗号分隔） |
-| `APPROVAL_ALLOW_PATHS` | 空 | 路径放行规则：`notes/` 目录前缀、`*.md` 文件名通配、其他视为路径前缀 |
-| `APPROVAL_ALLOW_COMMANDS` | 空 | run_bash 命令放行规则（按首行前缀匹配） |
-| `APPROVAL_DENY_TOOLS` | 空 | 强制拦截工具黑名单（命中直接拒绝、不进审批） |
-| `APPROVAL_DENY_PATHS` | 空 | 路径拦截规则（语法同 `ALLOW_PATHS`） |
-| `APPROVAL_DENY_COMMANDS` | 空 | run_bash 命令拦截规则（子串匹配） |
 | `MEMORY_RECALL_K` | `5` | 每次检索注入的历史 episode 条数 |
 | `TOOL_EXECUTION` | `parallel` | 并行 / 串行工具执行：`parallel` / `sequential` |
 | `WEB_SEARCH_PROVIDER` | `bing` | 搜索提供器：`bing` / `duckduckgo` |

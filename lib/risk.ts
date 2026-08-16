@@ -117,11 +117,14 @@ function getArgs(args: unknown): Record<string, unknown> {
  * 评估一次敏感工具调用的风险。
  * 返回等级与首个命中原因；未命中任何规则时仅返回基础等级。
  * @param source 工具来源（Phase 2）：core/mcp/skill/subagent，影响未登记工具的默认等级
+ * @param opts.astDangerChecker 危险命令 AST 检测开关（sceneRules.commandAstDangerChecker）；
+ *   false 时不按危险命令规则升级风险
  */
 export function assessRisk(
   toolName: string,
   args: unknown,
   source?: ToolSource,
+  opts?: { astDangerChecker?: boolean },
 ): RiskAssessment {
   let level = baseRisk(toolName, source);
   let reason: string | undefined;
@@ -130,14 +133,17 @@ export function assessRisk(
   if (toolName === "run_bash") {
     const command = getArgs(args).command;
     if (typeof command === "string") {
-      for (const rule of COMMAND_RULES) {
-        if (!rule.re.test(command)) continue;
-        const hit = rule.re.exec(command);
-        const m = hit ? hit[0] : undefined;
-        if (RISK_ORDER[rule.level] > RISK_ORDER[level]) {
-          level = rule.level;
-          reason = rule.label;
-          matched = m;
+      const astEnabled = opts?.astDangerChecker !== false;
+      if (astEnabled) {
+        for (const rule of COMMAND_RULES) {
+          if (!rule.re.test(command)) continue;
+          const hit = rule.re.exec(command);
+          const m = hit ? hit[0] : undefined;
+          if (RISK_ORDER[rule.level] > RISK_ORDER[level]) {
+            level = rule.level;
+            reason = rule.label;
+            matched = m;
+          }
         }
       }
     }

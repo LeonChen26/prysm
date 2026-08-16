@@ -68,8 +68,18 @@ export type PlanEvent =
       sessionId?: string;
     };
 
-/** 统一事件流：agent 事件 + 审批事件 + plan 事件 */
-export type BusEvent = UiEvent | ApprovalEvent | PlanEvent;
+/** 定时任务（自动化）执行事件（调度器 emit，供面板/通知感知） */
+export type AutomationEvent = {
+  type: "automation_run";
+  automationId: string;
+  name: string;
+  sessionId?: string;
+  status: "running" | "done" | "failed" | "skipped";
+  error?: string;
+};
+
+/** 统一事件流：agent 事件 + 审批事件 + plan 事件 + 自动化事件 */
+export type BusEvent = UiEvent | ApprovalEvent | PlanEvent | AutomationEvent;
 
 export interface AgentEventBus {
   emit(event: BusEvent): void;

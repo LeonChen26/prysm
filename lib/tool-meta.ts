@@ -49,4 +49,11 @@ export const TOOL_META: Record<string, ToolMeta> = {
   // 编排/计划工具：两形态通用（未标 surface），提示词工具清单可见
   spawn_subagent: { label: "派生子 agent", type: "任务", capability: "readwrite" },
   plan_propose: { label: "提出执行计划", type: "任务", capability: "readonly" },
+  // 技能按需加载：两形态通用（未标 surface）
+  use_skill: { label: "加载技能", type: "技能", capability: "readonly" },
+  // 偏好记忆管理：两形态通用（未标 surface）
+  remember_memory: { label: "记住偏好", type: "记忆", capability: "readonly" },
+  forget_memory: { label: "删除记忆", type: "记忆", capability: "readonly" },
+  // 定时任务（自动化）：对话中创建，两形态通用（未标 surface）
+  create_automation: { label: "创建定时任务", type: "自动化", capability: "readonly" },
 };

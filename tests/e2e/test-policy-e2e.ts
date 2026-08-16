@@ -1,7 +1,7 @@
 /**
- * 审批规则化 —— 真实 DeepSeek 端到端验证（走 HTTP SSE）。
- * 验证：写入 notes/（白名单命中）免审批；写入 testops/（未命中）触发审批。
- * 运行前需启动 dev server（.env.local 含 APPROVAL_ALLOW_PATHS=notes/,*.md）。
+ * 审批资源授权 —— 真实 DeepSeek 端到端验证（走 HTTP SSE）。
+ * 验证：写入 notes/（permission.json 默认路径白名单命中）免审批；写入 testops/（未命中）触发审批。
+ * 运行前需启动 dev server（默认 permission/global.json 含 filesystem.readWrite=["notes/","*.md","sub/dir"]）。
  * 运行：npx tsx test-policy-e2e.ts
  */
 import { AGENT_WORKDIR } from "../../lib/tools";

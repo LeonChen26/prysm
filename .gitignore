@@ -4,6 +4,9 @@ out/
 .env.local
 .env*.local
 agent-workdir/
+permission/
+memory/
+.trae/
 agent-memory.db
 sessions.db
 todo.db

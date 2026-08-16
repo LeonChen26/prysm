@@ -13,7 +13,9 @@ export type AuditAction =
   | "denied"
   | "timeout"
   | "denied_auto"
-  | "auto";
+  | "auto"
+  /** LLM Guardian 拒绝后回退用户确认（action=ask 记录在审计留痕） */
+  | "ask";
 
 export interface AuditRecord {
   id: number;

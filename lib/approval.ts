@@ -13,8 +13,7 @@
 
 import { logApproval } from "./audit";
 import type { RiskLevel } from "./risk";
-import { getApprovalTimeoutMs } from "./config";
-import { getPolicyApprovalTimeoutMs } from "./policy";
+import { getFileApprovalTimeoutMs } from "./permission";
 
 export interface ApprovalRequest {
   id: string;
@@ -84,15 +83,14 @@ function notifyLifecycle(e: ApprovalLifecycleEvent): void {
 /**
  * 发起一次审批请求，阻塞直到用户确认或超时（超时视为拒绝）。
  * 返回 Promise<boolean>：true=同意放行，false=拒绝/超时。
- * 超时优先级：参数 > policy 表（approval_timeout_ms）> config > env > 默认 120s。
+ * 超时优先级：参数 > permission.json（approvalTimeoutMs，缺省 120s）。
  */
 export function requestApproval(
   req: ApprovalRequest,
   timeoutMs?: number,
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    const effectiveTimeout =
-      timeoutMs ?? getPolicyApprovalTimeoutMs() ?? getApprovalTimeoutMs();
+    const effectiveTimeout = timeoutMs ?? getFileApprovalTimeoutMs();
     const createdAt = Date.now();
     const expiresAt = createdAt + effectiveTimeout;
     const state: ApprovalState = {

@@ -8,13 +8,25 @@ import { memoryRecallK, resetMemoryTracking, retrieveEpisodes } from "./memory";
 import { retrieveRagText } from "./rag";
 import { isAutoApproved, isDenied } from "./policy";
 import { assessRisk, toolSource } from "./risk";
+import {
+  getReviewer,
+  getSceneRules,
+  isFullAccessMode,
+  matchCommandRule,
+  matchMcpRule,
+  setActiveMode,
+  type PermissionMode,
+} from "./permission";
+import { guardianAssess } from "./guardian";
+import { decideApproval } from "./approval-policy";
 import { getSession, getSessionMessages } from "./session";
 import { setSessionWorkdir } from "./agent-context";
 import { resolveAgentTools } from "./tools/registry";
 import { setSpawnSubagentImpl } from "./tools";
 import type { SubagentSpec } from "./subagent";
 import { isSensitiveMcpTool } from "./tools/mcp";
-import { buildSkillPrompt } from "./skills";
+import { buildSkillIndex } from "./skills";
+import { buildPreferencePrompt } from "./preference-memory";
 import { resolveModel, resetModelRouter } from "./model-router";
 import { TOOL_META } from "./tool-meta";
 import { envValue } from "./config";
@@ -92,11 +104,15 @@ const agentModels = new Map<string, string>();
 /** 记录被用户主动停止的会话（run 结束后由路由消费） */
 const stoppedSessions = new Set<string>();
 
-/** 当前审批模式（由 /api/agent 请求体同步；dangerous = 跳过所有审批与拦截） */
-let approvalMode: "manual" | "auto" | "dangerous" = "manual";
-
-export function setApprovalMode(mode: "manual" | "auto" | "dangerous"): void {
-  approvalMode = mode;
+/**
+ * 设置审批模式（由 /api/agent 请求体同步；持久化到 permission.json activeMode）。
+ * 兼容历史值：dangerous → full（完全访问，跳过所有审批与拦截）。
+ */
+export function setApprovalMode(
+  mode: "manual" | "auto" | "full" | "custom" | "dangerous",
+): void {
+  const next: PermissionMode = mode === "dangerous" ? "full" : mode;
+  setActiveMode(next);
 }
 
 export function markStopped(sessionId: string): void {
@@ -290,9 +306,23 @@ export function getAgentForSession(sessionId: string): Agent | undefined {
   return agentPool.get(sessionId);
 }
 
+/** 从工具参数中提取相对路径（文件类工具；供 Guardian/授权复用） */
+function extractRelPath(args: unknown): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const a = args as Record<string, unknown>;
+  const v = typeof a.path === "string" ? a.path : typeof a.to === "string" ? a.to : undefined;
+  return v;
+}
+
 /**
  * 构建敏感工具审批 handler（主 agent 与子 agent 共用）。
- * 黑名单命中直接拦截；白名单命中自动放行（落审计）；否则征求用户确认。
+ * 决策链（对齐 Trae 权限审批）：
+ *   完全访问 → 放行
+ *   commandRules / mcpRules（deny/allow/ask，精确优先）→ 拦截 / 放行 / 走审批
+ *   资源授权白/黑名单（permission.json）→ 拦截 / 放行
+ *   场景开关（deleteToolApproval / mcpToolApproval）→ 关闭时放行
+ *   风险评估（commandAstDangerChecker 控制危险命令升级）
+ *   reviewer：user 弹卡 / llm（Guardian，拒绝回退用户）/ always_deny 拦截
  * @param sessionId 审批/审计关联的会话标识（子 agent 传其子 agent key，带标识回传）
  */
 function makeBeforeToolCall(
@@ -304,35 +334,83 @@ function makeBeforeToolCall(
       return undefined;
     }
 
-    // dangerous 模式：不做任何审批与拦截，直接放行（落审计留痕）
-    if (approvalMode === "dangerous") {
-      logApproval(toolCall.name, args, "auto", {
-        sessionId,
-        reason: "dangerous 模式，无需审批",
-      });
+    const isMcp = /^mcp__/.test(toolCall.name);
+    const command =
+      args && typeof args === "object" &&
+      typeof (args as Record<string, unknown>).command === "string"
+        ? String((args as Record<string, unknown>).command).trim()
+        : undefined;
+
+    // 规则命中（run_bash → commandRules；MCP → mcpRules，精确优先）
+    let ruleHit: { key: string; action: "allow" | "ask" | "deny" } | undefined;
+    if (isMcp) {
+      ruleHit = matchMcpRule(toolCall.name);
+    } else if (toolCall.name === "run_bash" && command) {
+      ruleHit = matchCommandRule(command);
+    }
+
+    const scene = getSceneRules();
+    const reviewer = getReviewer();
+    // 决策链纯函数（对齐 Trae：完全访问 > 规则裁决 > 资源授权白/黑名单 > 场景开关 > reviewer）
+    const decision = decideApproval({
+      toolName: toolCall.name,
+      args,
+      fullAccess: isFullAccessMode(),
+      isMcp,
+      ruleHit,
+      policyDeny: isDenied(toolCall.name, args),
+      policyAllow: isAutoApproved(toolCall.name, args),
+      scene,
+      reviewer,
+    });
+
+    if (decision.action === "allow") {
+      // 完全访问 / 规则 allow / 资源授权白名单 / 场景开关关闭 → 自动放行（落审计不打扰用户）
+      logApproval(toolCall.name, args, "auto", { sessionId, reason: decision.reason });
+      ensureDirAuthorized(args);
       return undefined;
     }
-
-    // 1) 强制拦截（deny 优先于 allow）
-    const deny = isDenied(toolCall.name, args);
-    if (deny.denied) {
-      const reason = deny.reason ?? "该操作被策略禁止";
-      logApproval(toolCall.name, args, "denied_auto", { sessionId, reason });
-      notifyApprovalNotice(toolCall.id, toolCall.name, args, reason, sessionId);
-      return { block: true, reason };
+    if (decision.action === "deny") {
+      // 规则 deny / 资源授权黑名单 / always_deny → 强制拦截并通知
+      logApproval(toolCall.name, args, "denied_auto", { sessionId, reason: decision.reason });
+      notifyApprovalNotice(toolCall.id, toolCall.name, args, decision.reason, sessionId);
+      return { block: true, reason: decision.reason };
     }
 
-    // 2) 白名单自动放行（落审计，不打扰用户）
-    if (isAutoApproved(toolCall.name, args)) {
-      logApproval(toolCall.name, args, "auto", {
-        sessionId,
-        reason: "命中自动放行规则",
+    // ask：风险评估（commandAstDangerChecker=false 时不按危险命令升级）
+    const risk = assessRisk(toolCall.name, args, toolSource(toolCall.name), {
+      astDangerChecker: scene.commandAstDangerChecker,
+    });
+
+    // 决策方 reviewer = llm：LLM Guardian 决策，拒绝回退用户确认（Trae 行为）
+    if (reviewer === "llm") {
+      const guardian = await guardianAssess({
+        toolName: toolCall.name,
+        args,
+        risk: risk.level,
+        riskReason: risk.reason,
+        ruleKey: ruleHit?.key,
+        path: extractRelPath(args),
       });
-      return undefined;
+      if (guardian && guardian.allow) {
+        logApproval(toolCall.name, args, "auto", {
+          sessionId,
+          reason: `LLM Guardian 放行${guardian.reason ? `：${guardian.reason}` : ""}`,
+        });
+        ensureDirAuthorized(args);
+        return undefined;
+      }
+      if (guardian) {
+        // Guardian 拒绝 → 回退用户确认
+        logApproval(toolCall.name, args, "ask", {
+          sessionId,
+          reason: `LLM Guardian 拒绝（${guardian.reason ?? ""}），回退用户确认`,
+        });
+      }
+      // guardian === undefined（模型不可用/解析失败）→ 直接走用户审批
     }
 
-    // 3) 人工审批（带风险等级与会话关联；外部来源按来源默认等级评估）
-    const risk = assessRisk(toolCall.name, args, toolSource(toolCall.name));
+    // 用户审批（带风险等级与会话关联；外部来源按来源默认等级评估）
     const approved = await requestApproval({
       id: toolCall.id,
       toolName: toolCall.name,
@@ -375,9 +453,11 @@ export async function getAgent(sessionId: string): Promise<Agent> {
   const workdir = getSession(sessionId)?.workdir;
   if (workdir) setSessionWorkdir(sessionId, workdir);
   const basePrompt = buildSystemPrompt(getAllowedRoots(), surface);
-  // Phase 4：已启用技能的正文拼入系统提示词
-  const skillPrompt = buildSkillPrompt();
-  const systemPrompt = skillPrompt ? `${basePrompt}\n\n${skillPrompt}` : basePrompt;
+  // Phase 4.1：已启用技能的"名称+描述"索引拼入系统提示词，模型按需通过 use_skill 加载正文
+  const skillIndex = buildSkillIndex();
+  // 偏好记忆（全局 + 当前工作区项目）注入系统提示词，跨会话持续生效
+  const prefMemory = buildPreferencePrompt(workdir);
+  const systemPrompt = [basePrompt, skillIndex, prefMemory].filter(Boolean).join("\n\n");
   const a = new Agent({
     initialState: {
       systemPrompt,

@@ -11,8 +11,12 @@
  * 本模块只依赖 Node 内置与 config，不依赖 Next.js / pi-agent-core。
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { basePath, getConfig } from "./config";
+
+/** 技能来源：项目技能（<baseDir>/skills）/ 全局技能（~/.prysm/skills） */
+export type SkillSource = "project" | "global";
 
 /** 单个 Skill 定义（由 SKILL.md 解析而来） */
 export interface SkillDef {
@@ -25,6 +29,8 @@ export interface SkillDef {
   body: string;
   /** 目录路径（便于定位） */
   path: string;
+  /** 技能来源：项目 / 全局 */
+  source: SkillSource;
 }
 
 /** SKILL.md frontmatter 的宽松解析结果 */
@@ -43,6 +49,7 @@ export function parseSkillMd(
   text: string,
   fallbackName: string,
   dir: string,
+  source: SkillSource = "project",
 ): SkillDef {
   let name = fallbackName;
   let version: string | undefined;
@@ -60,7 +67,7 @@ export function parseSkillMd(
     body = text.slice(m[0].length).trim();
   }
 
-  return { name, version, description, tools, body, path: dir };
+  return { name, version, description, tools, body, path: dir, source };
 }
 
 /** 解析 frontmatter 键值行：支持 `key: value` 与 `tools: [a, b]` */
@@ -91,31 +98,126 @@ function parseFrontmatter(block: string): Frontmatter {
 
 // ------------------------------------------------------------ 生命周期
 
+/** 持久化 Skill 相关设置（<baseDir>/skill-settings.json，如全局目录回退选择） */
+interface SkillSettings {
+  globalSkillsDir?: string;
+}
+
+function skillSettingsPath(): string {
+  return basePath("skill-settings.json");
+}
+
+function readSkillSettings(): SkillSettings {
+  try {
+    return JSON.parse(fs.readFileSync(skillSettingsPath(), "utf-8")) as SkillSettings;
+  } catch {
+    return {};
+  }
+}
+
+function writeSkillSettings(s: SkillSettings): void {
+  fs.mkdirSync(path.dirname(skillSettingsPath()), { recursive: true });
+  fs.writeFileSync(skillSettingsPath(), JSON.stringify(s, null, 2), "utf-8");
+}
+
+/**
+ * 全局技能目录（优先级：PrysmConfig.globalSkillsDir > 持久化回退选择 > ~/.prysm/skills）。
+ * 只读扫描用此函数；写操作前应调用 ensureGlobalSkillsDir() 完成可写性探测与回退。
+ */
+export function getGlobalSkillsDir(): string {
+  if (resolvedGlobalDir) return resolvedGlobalDir;
+  const cfg = getConfig();
+  if (cfg.globalSkillsDir) return cfg.globalSkillsDir;
+  const saved = readSkillSettings().globalSkillsDir;
+  if (saved) return saved;
+  return path.join(os.homedir(), ".prysm", "skills");
+}
+
+/** 探测目录可写性：创建目录并写删探针文件 */
+function ensureDirWritable(dir: string): boolean {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.probe-${process.pid}`);
+    fs.writeFileSync(probe, "ok", "utf-8");
+    fs.rmSync(probe, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** ensure 后生效的全局目录（模块级缓存：一次写操作探测后固定，避免每次扫描重复探测） */
+let resolvedGlobalDir: string | undefined;
+
+/**
+ * 确保全局技能目录可写（写操作前调用，幂等）：
+ * 目标目录（getGlobalSkillsDir）不可写时（如受控文件夹访问/安全软件按进程拦截），
+ * 自动回退到 <baseDir>/global-skills（Electron 下即 userData，Web 下为项目目录），并持久化回退选择。
+ * 返回实际生效的全局目录。
+ */
+export function ensureGlobalSkillsDir(): string {
+  const target = getGlobalSkillsDir();
+  if (ensureDirWritable(target)) {
+    resolvedGlobalDir = target;
+    return target;
+  }
+  const fallback = basePath("global-skills");
+  if (!ensureDirWritable(fallback)) {
+    throw new Error(
+      `全局技能目录不可写（${target}），且回退目录（${fallback}）也不可写。请检查目录权限或通过设置指定可写的全局技能目录。`,
+    );
+  }
+  resolvedGlobalDir = fallback;
+  writeSkillSettings({ globalSkillsDir: fallback });
+  console.log(`[skills] 全局技能目录 ${target} 不可写，已回退到 ${fallback}`);
+  return fallback;
+}
+
+/** 按来源取技能根目录（create/delete 与 API 路由用；全局目录先做可写性探测与回退） */
+export function skillRoot(scope: SkillSource): string {
+  return scope === "global"
+    ? ensureGlobalSkillsDir()
+    : getConfig().skillsDir ?? basePath("skills");
+}
+
 const loaded = new Map<string, SkillDef>();
 const enabled = new Set<string>();
 let scanned = false;
 
-/** 扫描 skills 目录（默认 <baseDir>/skills，可经 skillsDir 指定），返回全部 SkillDef（纯函数） */
+/**
+ * 扫描技能目录（项目 + 全局两级；同名冲突时项目优先），返回全部 SkillDef（纯函数）。
+ * 显式传入 dir 时仅扫描该目录，source 按"是否等于全局目录"推断（测试与 API 路由用）。
+ */
 export function loadSkills(dir?: string): SkillDef[] {
-  const root = dir ?? getConfig().skillsDir ?? basePath("skills");
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+  const roots: { dir: string; source: SkillSource }[] = dir
+    ? [{ dir, source: dir === getGlobalSkillsDir() ? "global" : "project" }]
+    : [
+        { dir: getConfig().skillsDir ?? basePath("skills"), source: "project" },
+        { dir: getGlobalSkillsDir(), source: "global" },
+      ];
   const out: SkillDef[] = [];
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    const skillDir = path.join(root, e.name);
-    const md = path.join(skillDir, "SKILL.md");
-    let text: string;
+  const seen = new Set<string>();
+  for (const { dir: root, source } of roots) {
+    let entries: fs.Dirent[];
     try {
-      text = fs.readFileSync(md, "utf-8");
+      entries = fs.readdirSync(root, { withFileTypes: true });
     } catch {
-      continue; // 目录无 SKILL.md → 不算 skill
+      continue; // 目录不存在（如全局目录尚未创建）则跳过
     }
-    out.push(parseSkillMd(text, e.name, skillDir));
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      if (seen.has(e.name)) continue; // 同名：项目技能优先，跳过全局
+      const skillDir = path.join(root, e.name);
+      const md = path.join(skillDir, "SKILL.md");
+      let text: string;
+      try {
+        text = fs.readFileSync(md, "utf-8");
+      } catch {
+        continue; // 目录无 SKILL.md → 不算 skill
+      }
+      out.push(parseSkillMd(text, e.name, skillDir, source));
+      seen.add(e.name);
+    }
   }
   return out;
 }
@@ -221,14 +323,32 @@ export function enabledSkillTools(): string[] {
   return [...names];
 }
 
-/** 已启用技能的正文拼装（注入系统提示词；无启用技能返回空串） */
-export function buildSkillPrompt(): string {
-  const bodies = enabledSkillNames()
+/** 按名称取已登记技能（未登记时自动扫描一次；供 use_skill 工具加载） */
+export function getSkillByName(name: string): SkillDef | undefined {
+  if (!loaded.has(name)) initSkills();
+  return loaded.get(name);
+}
+
+/** 技能是否已启用（供 use_skill 工具校验） */
+export function isSkillEnabled(name: string): boolean {
+  if (!loaded.has(name)) initSkills();
+  return enabled.has(name);
+}
+
+/**
+ * 已启用技能的"名称+描述"索引（注入系统提示词；按需加载入口，无启用技能返回空串）。
+ * 模型据此判断任务相关性，需要时调用 use_skill 工具加载完整正文。
+ */
+export function buildSkillIndex(): string {
+  const lines = enabledSkillNames()
     .map((n) => loaded.get(n))
     .filter((s): s is SkillDef => Boolean(s))
-    .filter((s) => s.body.length > 0)
-    .map((s) => `【技能 ${s.name}】\n${s.body}`);
-  return bodies.join("\n\n");
+    .map((s) => `- ${s.name}${s.description ? `: ${s.description}` : ""}`);
+  if (lines.length === 0) return "";
+  return (
+    "以下技能提供特定任务的专用指令。当任务与某个技能的描述匹配时，调用 use_skill 工具加载该技能的完整说明并按其执行：\n" +
+    lines.join("\n")
+  );
 }
 
 /** 仅用于测试：重置扫描状态与启用集合 */
@@ -236,4 +356,5 @@ export function resetSkills(): void {
   loaded.clear();
   enabled.clear();
   scanned = false;
+  resolvedGlobalDir = undefined;
 }

@@ -2,7 +2,7 @@ import { contentText } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { consumeStopped, generateTitle, logRun, setApprovalMode } from "@/lib/agent";
 import { judgeRun } from "@/lib/judge";
-import { setPlanCtx, setSessionWorkdirOverride } from "@/lib/tools";
+import { setMemoryCtx, setPlanCtx, setSessionWorkdirOverride } from "@/lib/tools";
 import { rememberMessages } from "@/lib/memory";
 import { createCore } from "@/lib/core";
 import { toImageContents, extractImages } from "@/lib/attachments";
@@ -90,9 +90,9 @@ export async function POST(req: Request) {
     .filter((img) => img && typeof img.data === "string" && img.data && typeof img.mimeType === "string")
     .map((img) => ({ data: img.data as string, mimeType: img.mimeType as string }));
   const imageContents = toImageContents(images);
-  // 同步审批模式（dangerous = 无需审批），供 makeBeforeToolCall 读取
+  // 同步审批模式（持久化到 permission.json activeMode；dangerous 兼容为 full）
   const am = body?.approvalMode;
-  if (am === "manual" || am === "auto" || am === "dangerous") {
+  if (am === "manual" || am === "auto" || am === "full" || am === "custom" || am === "dangerous") {
     setApprovalMode(am);
   }
   const session = resolveSession(body);
@@ -187,6 +187,7 @@ export async function POST(req: Request) {
       setPlanCtx({ sessionId: session.id, surface: session.surface ?? "coding" });
       // 注入会话绑定目录（coding 时文件工具以该目录为根）
       setSessionWorkdirOverride(session.workdir);
+      setMemoryCtx({ workdir: session.workdir });
       try {
         await a.prompt(message, imageContents.length > 0 ? imageContents : undefined);
         await a.waitForIdle();
@@ -280,6 +281,7 @@ export async function POST(req: Request) {
         unsubBus();
         setPlanCtx(undefined);
         setSessionWorkdirOverride(undefined);
+        setMemoryCtx(undefined);
         send(
           stopped
             ? { type: "stopped", message: "任务已停止" }

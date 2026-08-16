@@ -30,26 +30,45 @@ export async function GET() {
 }
 
 /**
- * POST /api/mcp —— 新增 stdio MCP 服务器（body: { name, command, args? }）
+ * POST /api/mcp —— 新增 MCP 服务器（body: { name, type?, command?, args?, env?, url?, headers? }）
+ * type：stdio（默认，本地子进程）| http | sse（远程）。
  * 写回 mcp.json 并连接；成功后刷新工具注册表（下次工具解析含新服务器工具）。
  */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
     const name = String(body?.name ?? "").trim();
-    const command = String(body?.command ?? "").trim();
     if (!MCP_NAME_RE.test(name)) {
       return Response.json(
         { error: "服务器名非法：仅允许字母/数字/下划线/连字符" },
         { status: 400 },
       );
     }
-    if (!command) {
-      return Response.json({ error: "command 不能为空（如 npx / uvx）" }, { status: 400 });
+    const type = String(body?.type ?? "").trim() || "stdio";
+    if (!["stdio", "http", "sse"].includes(type)) {
+      return Response.json({ error: "type 仅支持 stdio / http / sse" }, { status: 400 });
     }
-    const args = Array.isArray(body?.args) ? body.args.map(String) : undefined;
     const pool = getMcpPool();
-    await pool.addServer(name, { command, args });
+    if (type === "stdio") {
+      const command = String(body?.command ?? "").trim();
+      if (!command) {
+        return Response.json({ error: "command 不能为空（如 npx / uvx）" }, { status: 400 });
+      }
+      const args = Array.isArray(body?.args) ? body.args.map(String) : undefined;
+      const env = stringRecord(body?.env);
+      await pool.addServer(name, { command, args, env });
+    } else {
+      const url = String(body?.url ?? "").trim();
+      if (!/^https?:\/\//i.test(url)) {
+        return Response.json({ error: "url 必须为合法的 http/https 地址" }, { status: 400 });
+      }
+      const headers = stringRecord(body?.headers);
+      await pool.addServer(name, {
+        url,
+        transport: type === "sse" ? "sse" : "http",
+        headers,
+      });
+    }
     resetToolRegistry();
     return Response.json({ ok: true, ...(await snapshot(pool)) });
   } catch (err) {
@@ -58,6 +77,16 @@ export async function POST(req: Request) {
       { status: 409 },
     );
   }
+}
+
+/** body 中的对象字段统一规范为字符串映射（非对象/含非字符串值时丢弃该字段） */
+function stringRecord(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof val === "string" && val.trim()) out[k] = val;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** DELETE /api/mcp?name=xxx —— 删除并断开某 stdio 服务器（同时从 mcp.json 移除） */

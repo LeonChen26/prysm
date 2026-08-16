@@ -36,20 +36,10 @@ import {
   removeWorkspace as removeWorkspaceRecord,
   revokeWorkspaceAccess as revokeWorkspaceRecord,
 } from "./workspace";
-import {
-  addPolicyRule,
-  clearPolicyRules,
-  configurePolicy,
-  getPolicyApprovalTimeoutMs,
-  listPolicyRules,
-  removePolicyRule,
-  type PolicyKind,
-  type PolicyRule,
-} from "./policy";
 import { configureMcp, getMcpPool, type McpServerStatus } from "./tools/mcp";
 import { resolveAgentTools, type ToolFilter } from "./tools/registry";
 import {
-  buildSkillPrompt,
+  buildSkillIndex,
   disableSkill,
   enableSkill,
   initSkills,
@@ -57,8 +47,25 @@ import {
   reloadSkills,
   type SkillDef,
 } from "./skills";
+import {
+  createAutomation as createAutomationRecord,
+  deleteAutomation as deleteAutomationRecord,
+  listAutomationRuns,
+  listAutomations,
+  setAutomationEnabled,
+  updateAutomation as updateAutomationRecord,
+  type Automation,
+  type AutomationInput,
+  type AutomationPatch,
+  type AutomationRun,
+} from "./automation";
+import {
+  bindAutomationEventBus,
+  runAutomationNow,
+  startScheduler,
+} from "./scheduler";
 
-export type { PrysmConfig, Surface, PolicyKind, PolicyRule };
+export type { PrysmConfig, Surface };
 
 export interface WorkspaceInfo {
   id: string;
@@ -80,32 +87,35 @@ export interface PrysmCore {
   removeWorkspace: (id: string) => void;
   grantWorkspaceAccess: (id: string) => WorkspaceInfo | undefined;
   revokeWorkspaceAccess: (id: string) => WorkspaceInfo | undefined;
-  listPolicyRules: () => PolicyRule[];
-  addPolicyRule: (kind: PolicyKind, value: string) => PolicyRule;
-  removePolicyRule: (id: number) => boolean;
-  clearPolicyRules: () => void;
-  getPolicyApprovalTimeoutMs: () => number | undefined;
   // Phase 3：MCP 接入（tools+resources+prompts，stdio）
   initMcp: () => Promise<McpServerStatus[]>;
   mcpStatus: () => McpServerStatus[];
   resolveTools: (filter?: ToolFilter) => Promise<AgentTool[]>;
-  // Phase 4：Skill 机制（SKILL.md + 注入 + 工具）
+  // Phase 4.1：Skill 机制（SKILL.md + 名称描述索引 + use_skill 按需加载）
   listSkills: () => (SkillDef & { enabled: boolean })[];
   enableSkill: (name: string) => boolean;
   disableSkill: (name: string) => boolean;
   reloadSkills: () => SkillDef[];
-  skillPrompt: () => string;
+  skillIndex: () => string;
   // Phase 5：多模型路由（role → provider/model；list 含注入/表/默认 合并结果）
   listModelRoutes: () => Record<ModelRole, ModelRoute>;
   setModelRoute: (role: ModelRole, provider: string, model: string) => ModelRoute;
+  // 定时任务（自动化）：配置管理 + 执行
+  listAutomations: () => Automation[];
+  createAutomation: (input: AutomationInput) => Automation;
+  updateAutomation: (id: string, patch: AutomationPatch) => Automation | undefined;
+  deleteAutomation: (id: string) => boolean;
+  toggleAutomation: (id: string, enabled: boolean) => Automation | undefined;
+  listAutomationRuns: (limit?: number) => AutomationRun[];
+  runAutomationNow: (
+    id: string,
+  ) => Promise<{ status: string; sessionId?: string; error?: string }>;
   // 后续扩展：subagentPool 等
 }
 
 export function createCore(config: PrysmConfig): PrysmCore {
-  // 注入运行时配置：路径基准 + 环境变量 + 默认模型/审批超时等
+  // 注入运行时配置：路径基准 + 环境变量 + 默认模型等
   configure(config);
-  // Phase 2：策略数据源注入（非空字段覆盖 SQLite/env；undefined 则走 SQLite/env 兼容）
-  configurePolicy(config.policy);
   // Phase 3：MCP 池配置注入（显式指定 mcp.json 时使用；否则惰性读取 <baseDir>/mcp.json）
   if (config.mcpConfigPath) configureMcp(config.mcpConfigPath);
 
@@ -186,6 +196,11 @@ export function createCore(config: PrysmConfig): PrysmCore {
     authorized: w.authorized === 1 || w.authorized === true,
   });
 
+  // 定时任务调度器：绑定事件总线（automation_run 事件推送）并启动（幂等，防热重载重复）。
+  // 测试/特殊环境可通过 config.disableScheduler 关闭自动启动。
+  bindAutomationEventBus(eventBus);
+  if (!config.disableScheduler) startScheduler();
+
   return {
     // Phase 7.5：核心层直接 emit —— agent 事件经 mapEvent 注入共享 bus（带 sessionId 供壳侧按会话隔离）。
     // 注意：agent 实例按 sessionId 缓存复用，必须确保每个 agent 只注册一次监听器，
@@ -215,7 +230,7 @@ export function createCore(config: PrysmConfig): PrysmCore {
       return { id: w.id, name: w.name, root: w.root, authorized: true };
     },
     eventBus,
-    // Phase 2：目录授权（默认拒绝）+ 策略管理
+    // Phase 2：目录授权（默认拒绝）
     addWorkspace: (root, name) => toInfo(addWorkspaceRecord(root, name)),
     removeWorkspace: (id) => removeWorkspaceRecord(id),
     grantWorkspaceAccess: (id) => {
@@ -226,11 +241,6 @@ export function createCore(config: PrysmConfig): PrysmCore {
       const w = revokeWorkspaceRecord(id);
       return w ? toInfo(w) : undefined;
     },
-    listPolicyRules: () => listPolicyRules(),
-    addPolicyRule: (kind, value) => addPolicyRule(kind, value),
-    removePolicyRule: (id) => removePolicyRule(id),
-    clearPolicyRules: () => clearPolicyRules(),
-    getPolicyApprovalTimeoutMs: () => getPolicyApprovalTimeoutMs(),
     // Phase 3：MCP 池状态 / 工具集解析
     initMcp: () => getMcpPool().ensureInit(),
     mcpStatus: () => getMcpPool().status(),
@@ -240,9 +250,17 @@ export function createCore(config: PrysmConfig): PrysmCore {
     enableSkill: (name) => enableSkill(name),
     disableSkill: (name) => disableSkill(name),
     reloadSkills: () => reloadSkills(),
-    skillPrompt: () => buildSkillPrompt(),
+    skillIndex: () => buildSkillIndex(),
     // Phase 5：模型路由（读/写 model_route 表，list 含注入>表>默认）
     listModelRoutes: () => listModelRoutesAll(),
     setModelRoute: (role, provider, model) => setModelRouteRecord(role, provider, model),
+    // 定时任务（自动化）：配置管理 + 执行
+    listAutomations: () => listAutomations(),
+    createAutomation: (input) => createAutomationRecord(input),
+    updateAutomation: (id, patch) => updateAutomationRecord(id, patch),
+    deleteAutomation: (id) => deleteAutomationRecord(id),
+    toggleAutomation: (id, enabled) => setAutomationEnabled(id, enabled),
+    listAutomationRuns: (limit) => listAutomationRuns(limit),
+    runAutomationNow: (id) => runAutomationNow(id),
   };
 }

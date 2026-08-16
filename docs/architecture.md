@@ -144,19 +144,21 @@ class ToolRegistry {
 
 ### 6.1 MCP（work 侧，全量）
 - 依赖官方 `@modelcontextprotocol/sdk`；接入 **tools + resources + prompts** 三类能力。
-- 传输：**stdio（本地子进程）先行**，SSE / streamable HTTP 后补。
+- 传输（对齐 Trae Work MCP 配置）：**stdio（本地子进程）** + **streamable HTTP** + **SSE（远程）**。stdio 走 `command/args/env`；远程走 `url/headers`（如 `Authorization: Bearer xxx`，经 `requestInit` 透传）。SSE 为兼容旧 server 保留（SDK 标注 deprecated）。
 - 配置：`mcp.json` 声明 server（command/args 或 url+transport）。默认位置 `<baseDir>/mcp.json`，后续可扩展 per-workspace 覆盖。
-- `lib/tools/mcp.ts`：`McpClientPool`（连接生命周期）+ `McpToolProvider` + `jsonSchemaToTypebox`（JSON Schema → typebox，兜底 `Type.Unsafe`）。
+- **超时配置**：`START_MCP_TIMEOUT_MS`（连接，默认 15s）/ `RUN_MCP_TIMEOUT_MS`（工具/资源/prompt 调用，默认 60s），stdio 从 `env` 读取、远程从 `headers` 读取；这两个键不随环境变量/请求头透传给对端。
+- **变量引用**：`${workspaceFolder}` 启动时替换为最近活跃会话绑定目录（回退默认工作区根 `agent-workdir`），用于构造项目相关命令参数/路径。
+- `lib/tools/mcp.ts`：`McpClientPool`（连接生命周期）+ `McpToolProvider` + `jsonSchemaToTypebox`（JSON Schema → typebox，兜底 `Type.Unsafe`）+ `resolveTimeouts` / `applyWorkspaceFolder`。
 - `execute` 调 `callTool`；`content` 的 text/image → `AgentToolResult.content`；`structuredContent` stringify 追加为 text；resources/prompts 映射为只读工具或上下文注入。
 - **降级**：server 崩溃 / 连接超时 → 该 server 工具标记不可用，agent 收到错误提示而非整体卡死；可配自动重连。
 
 ### 6.2 Skill（coding 侧）
 - Skill = 可复用能力包 = 提示词片段 + 可选工具（`pi-agent-core` 无此概念，自建轻量版，对齐 pi 的 `SKILL.md`）。
 - `skills/<name>/SKILL.md`：frontmatter（`name` / `description` / `tools` / `version`）+ 正文。
-- 启动扫描 `skills/`（默认 `<baseDir>/skills`），`tools` 注册到 registry。
-- **注入时机**：`SYSTEM_PROMPT`（现为 `agent.ts` 静态常量）改为在 `getAgent` 构造 Agent 时**按会话启用的 skill 动态拼装**（基础提示词 + 启用 skill 的正文），而非全局静态拼接。
-- **`SYSTEM_PROMPT` 硬编码路径修正**：现有提示词正文写死「agent-workdir 目录」（`agent.ts:29-30`），多工作区后工作区根不再固定。Phase 1b 将基础提示词改为**函数**（`buildSystemPrompt(workspaceRoots)`），动态注入当前工作区路径。
-- 生命周期：会话级启用/禁用；开发期热加载；版本/冲突用 `name+version` 去重，后注册覆盖。
+- **双目录（Phase 4.1）**：项目技能 `<baseDir>/skills` + 全局技能 `~/.prysm/skills`（可经 `PrysmConfig.globalSkillsDir` 覆盖），同名冲突时项目优先；`SkillDef.source` 标记来源。全局目录写操作前经 `ensureGlobalSkillsDir` 做可写性探测，不可写时（如系统受控文件夹访问拦截）自动回退到 `<baseDir>/global-skills` 并持久化回退选择（`<baseDir>/skill-settings.json`）。
+- **按需加载（Phase 4.1，对齐 Trae Work 技能设计）**：系统提示词仅注入已启用技能的**名称+描述索引**（`buildSkillIndex`），不再全量拼入正文；新增内置工具 `use_skill`，模型判断任务相关时调用它以加载完整正文（含技能目录路径，相对路径引用按该目录解析）。
+- 生命周期：会话级启用/禁用；开发期热加载；`tools` 经 SkillToolProvider 同名暴露内置/MCP 工具。
+- 手动调用：`/skill <名称> [任务]` 斜杠命令；设置面板技能卡片「运行」按钮（新建会话 + 预设技能调用提示词）。
 
 ### 6.3 子 agent（任务级编排）
 - 主 agent 通过 `spawn_subagent` 内置工具派生；prysm 层维护「子 agent 池」。
@@ -185,7 +187,28 @@ class ToolRegistry {
 - 依赖 `buildContext` 挂载点（Phase 1a.1）和多工作区文档索引（Phase 1b）。
 - **待 Phase 6 前细化的决策点**：索引策略（全量 vs 增量）、索引存储位置（建议随 workspace 存 `prysm.db` 或独立索引文件）、嵌入模型选型（本地 vs API）。
 
-### 6.7 多模型路由
+### 6.7 偏好记忆（对齐 TraeWork「记忆」设计）
+- 区别于「情景记忆」（SQLite 检索式对话轨迹），偏好记忆保存**显式偏好与规则**（markdown 文件），注入系统提示词跨会话持续生效。
+- **存储**：全局 `<baseDir>/memory/user_profile.md` + 项目 `<baseDir>/memory/projects/<encoded-workdir>/project_memory.md`（按会话绑定工作目录区分，`lib/preference-memory.ts`）。
+- **AI 管理**：内置工具 `remember_memory` / `forget_memory`（对话中"记住/更新/删除"偏好；scope=global|project，默认 project），会话 workdir 由 agent route 经 `setMemoryCtx` 注入。
+- **注入**：`getAgent` 构造 systemPrompt 时拼入 `buildPreferencePrompt(workdir)`（全局 + 项目两级，含管理引导）；`context-analysis` 同步估算。
+- **UI 管理**：设置面板「数据」Tab 偏好记忆区块（textarea 编辑 + 保存，`/api/memory-files`）；备份/恢复纳入偏好记忆文件（`BackupFile.preferenceMemory`）。
+
+### 6.8 定时任务（自动化，对齐 TraeWork「定时任务」设计）
+- 目标：按固定时间/固定间隔自动执行预设任务并生成结果，无需人工干预。触发方式：间隔（任意分钟）/ 固定时间（每天/每周/每月 cron）。
+- **数据层** `lib/automation.ts`（独立 `automations.db`）：
+  - `automations` 表：名称/内容（prompt）/形态（surface，创建后不可改）/绑定目录（workdir，创建后不可改）/触发（schedule_type=interval|cron + interval_minutes / cron_expr）/schedule_desc（展示描述）/启用态/next_run_at/last_run_at/last_status/last_session_id/run_count。
+  - `automation_runs` 表：执行历史（每次执行生成独立会话，可跳转查看对话流）。
+  - `computeNextRunAt`：interval 顺延；cron 取下一个匹配点。
+- **cron 解析** `lib/cron.ts`（纯函数，零依赖）：标准 5 字段（分 时 日 月 周），支持 `*`、步进、范围、列表；日/周双限定取并集；周 7 归一化为 0；越界/非法表达式抛错；`nextCronRun` 逐分钟推进（上限 5 年防死循环）。
+- **调度器** `lib/scheduler.ts`：`startScheduler` 模块级单例（幂等，Web dev 热重载不重复），每 30s tick；`tickAutomations` 选出到期任务执行；上一轮仍 `running` 的任务本轮跳过并记录 `skipped`（防同任务重叠）。`createCore` 自动启动，`PrysmConfig.disableScheduler` 可关闭（测试用）。
+- **执行链路** `runAutomationNow`：每次执行**新建独立会话**（title=任务名，surface/workdir 按任务配置）→ `getAgent` + `prompt` + 会话持久化 + `logRun`（复用 `app/api/agent` 收尾链路，无 SSE）→ 记录 run + 推进 next_run → `eventBus` emit `automation_run`。失败记录 `failed` 不阻塞其他任务。
+- **对话中创建**：内置工具 `create_automation`（对话中自然语言 → 模型解析为 interval_minutes / cron_expr 结构化参数），surface 取当前会话、workdir 取会话绑定目录；`TOOL_META` 两形态通用。
+- **API** `/api/automations`：GET 列表+历史；POST action=create/update/toggle/delete/run。
+- **前端**：左栏「自动化」视图（activityView 扩展）+ `components/automation-panel.tsx`：已配置（启停/立即运行/编辑/删除）/ 执行历史（跳转对话流）/ 任务模板（内置 3 模板）/ 手动新建弹窗（interval 或 每天/每周/每月 + 时:分）/ 「在对话中创建」（预填创建提示并聚焦输入框）。
+- **备份**：`BackupFile.automations` 纳入导出/恢复（不含执行历史）。
+
+### 6.9 多模型路由
 - 强模型编排、小模型执行/摘要/标题。现有 `ensureModels` 已支持多 provider，`generateTitle`/`summarize` 已用模型做轻任务，此处显式化 + 路由策略化。
 - **改造点（三处）**：
   1. `ensureModels`（`agent.ts:42`）：当前是模块级单例 `let models`，仅缓存单一 provider/model。需改为**模型注册表**（多 provider/model 并存），按需获取。

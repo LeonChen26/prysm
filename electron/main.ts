@@ -217,7 +217,7 @@ function registerIpc(): void {
     return true;
   });
 
-  // 工作区 / 技能 / 策略 / 运行日志 / 模型路由
+  // 工作区 / 技能 / 运行日志 / 模型路由
   ipcMain.handle("prysm:listWorkspaces", () => core.listWorkspaces());
   ipcMain.handle("prysm:addWorkspace", (_e, root: string, name?: string) =>
     core.addWorkspace(root, name),
@@ -232,11 +232,11 @@ function registerIpc(): void {
   ipcMain.handle("prysm:listSkills", () => core.listSkills());
   ipcMain.handle("prysm:enableSkill", (_e, name: string) => core.enableSkill(name));
   ipcMain.handle("prysm:disableSkill", (_e, name: string) => core.disableSkill(name));
-  ipcMain.handle("prysm:listPolicyRules", () => core.listPolicyRules());
-  ipcMain.handle("prysm:addPolicyRule", (_e, kind: string, value: string) =>
-    core.addPolicyRule(kind as never, value),
-  );
-  ipcMain.handle("prysm:removePolicyRule", (_e, id: number) => core.removePolicyRule(id));
+  ipcMain.handle("prysm:openPath", (_e, p: string) => {
+    if (typeof p !== "string" || !p) return;
+    // 在系统文件管理器中定位/打开配置文件
+    shell.showItemInFolder(p);
+  });
   ipcMain.handle("prysm:listRunLogs", () => getRunLogs());
   ipcMain.handle("prysm:listModelRoutes", () => core.listModelRoutes());
   ipcMain.handle("prysm:setModelRoute", (_e, role: string, provider: string, model: string) =>

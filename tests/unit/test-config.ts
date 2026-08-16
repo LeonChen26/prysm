@@ -8,7 +8,6 @@ import {
   basePath,
   configure,
   envValue,
-  getApprovalTimeoutMs,
   getConfig,
   getDefaultModel,
   getDefaultProvider,
@@ -91,32 +90,25 @@ const afterReset = getConfig();
 if (afterReset.baseDir === "/x") fail("resetConfig 应清理注入");
 expectEq("reset 后回到 process.cwd()", afterReset.baseDir, process.cwd());
 
-console.log("\n== 模型/审批默认值访问器 ==");
+console.log("\n== 模型默认值访问器 ==");
 resetConfig();
 expectEq("默认 provider 兜底 anthropic", getDefaultProvider(), "anthropic");
 expectEq("默认 model 兜底 claude-sonnet-4-5", getDefaultModel(), "claude-sonnet-4-5");
-expectEq("默认审批超时兜底 120000", getApprovalTimeoutMs(), 120000);
 process.env.MODEL_PROVIDER = "deepseek";
 process.env.MODEL_ID = "deepseek-chat";
 expectEq("env MODEL_PROVIDER 生效", getDefaultProvider(), "deepseek");
 expectEq("env MODEL_ID 生效", getDefaultModel(), "deepseek-chat");
-expectEq("env APPROVAL_TIMEOUT_MS 生效", (() => {
-  process.env.APPROVAL_TIMEOUT_MS = "5000";
-  return getApprovalTimeoutMs();
-})(), 5000);
 delete process.env.MODEL_PROVIDER;
 delete process.env.MODEL_ID;
-delete process.env.APPROVAL_TIMEOUT_MS;
 expectEq("注入 defaultProvider 优先于 env", (() => {
   process.env.MODEL_PROVIDER = "openai";
   const v = getDefaultProvider();
   delete process.env.MODEL_PROVIDER;
   return v;
 })(), "openai");
-configure({ baseDir: customDir, defaultProvider: "google", defaultModel: "gemini-x", approvalTimeoutMs: 9999 });
+configure({ baseDir: customDir, defaultProvider: "google", defaultModel: "gemini-x" });
 expectEq("注入 defaultProvider 覆盖 env", getDefaultProvider(), "google");
 expectEq("注入 defaultModel 覆盖 env", getDefaultModel(), "gemini-x");
-expectEq("注入 approvalTimeoutMs 覆盖 env", getApprovalTimeoutMs(), 9999);
 
 console.log("\n✓ 配置注入验证通过");
 resetConfig();

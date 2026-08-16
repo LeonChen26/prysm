@@ -5,12 +5,19 @@ import {
   enableSkill,
   listSkills,
   reloadSkills,
+  skillRoot,
+  type SkillSource,
 } from "@/lib/skills";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GET /api/skills —— 全部已登记技能（含 enabled 状态，技能面板用） */
+/** 解析创建/删除目标来源（默认项目） */
+function resolveScope(raw: unknown): SkillSource {
+  return raw === "global" ? "global" : "project";
+}
+
+/** GET /api/skills —— 全部已登记技能（含 enabled 状态与 source，技能面板用） */
 export async function GET() {
   try {
     return Response.json({ skills: listSkills() });
@@ -22,7 +29,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/skills —— 启用/禁用/重载/新建/删除（body: { name, action }） */
+/** POST /api/skills —— 启用/禁用/重载/新建/删除（body: { name, action, scope }） */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -37,12 +44,15 @@ export async function POST(req: Request) {
     }
     if (action === "create") {
       try {
-        const skill = createSkill({
-          name,
-          description: body?.description ? String(body.description) : undefined,
-          tools: Array.isArray(body?.tools) ? body.tools.map(String) : undefined,
-          body: body?.body ? String(body.body) : undefined,
-        });
+        const skill = createSkill(
+          {
+            name,
+            description: body?.description ? String(body.description) : undefined,
+            tools: Array.isArray(body?.tools) ? body.tools.map(String) : undefined,
+            body: body?.body ? String(body.body) : undefined,
+          },
+          skillRoot(resolveScope(body?.scope)),
+        );
         return Response.json({ ok: true, skill });
       } catch (err) {
         return Response.json(
@@ -52,7 +62,7 @@ export async function POST(req: Request) {
       }
     }
     if (action === "delete") {
-      if (!deleteSkill(name)) {
+      if (!deleteSkill(name, skillRoot(resolveScope(body?.scope)))) {
         return Response.json({ error: `技能 ${name} 不存在` }, { status: 404 });
       }
       return Response.json({ ok: true, name, deleted: true });

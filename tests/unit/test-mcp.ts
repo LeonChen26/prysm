@@ -11,11 +11,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import http from "node:http";
+import { randomUUID } from "node:crypto";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { configure, resetConfig } from "../../lib/config";
 import {
   McpClientPool,
   McpToolProvider,
+  applyWorkspaceFolder,
+  applyWorkspaceFolderList,
   isSensitiveMcpTool,
   jsonSchemaToTypebox,
   loadMcpConfig,
@@ -23,9 +28,17 @@ import {
   mcpToolProviders,
   getMcpPool,
   resetMcpPool,
+  resolveTimeouts,
+  resolveWorkspaceFolder,
 } from "../../lib/tools/mcp";
 import { ToolRegistry, resolveAgentTools, resetToolRegistry } from "../../lib/tools/registry";
 import { toolSource } from "../../lib/risk";
+import { Server as McpSdkServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);
@@ -100,6 +113,41 @@ console.log("\n== loadMcpConfig：缺失 / 非法 / 正常 ==");
   const good = path.join(tmp, "good.json");
   fs.writeFileSync(good, JSON.stringify({ servers: { a: { command: "x" } } }), "utf-8");
   expectEq("正常解析", JSON.stringify(loadMcpConfig(good)), JSON.stringify({ a: { command: "x" } }));
+}
+
+console.log("\n== resolveTimeouts：超时配置（默认 / stdio env / 远程 headers） ==");
+{
+  const def = resolveTimeouts({ command: "npx", args: ["-y", "x"] });
+  expectEq("默认连接超时 15s", def.connect, 15_000);
+  expectEq("默认调用超时 60s", def.run, 60_000);
+  const stdio = resolveTimeouts({
+    command: "npx",
+    env: { START_MCP_TIMEOUT_MS: "3000", RUN_MCP_TIMEOUT_MS: "4000" },
+  });
+  expectEq("stdio env 覆盖连接超时", stdio.connect, 3_000);
+  expectEq("stdio env 覆盖调用超时", stdio.run, 4_000);
+  const bad = resolveTimeouts({ command: "npx", env: { START_MCP_TIMEOUT_MS: "abc" } });
+  expectEq("非法值回退默认", bad.connect, 15_000);
+  const remote = resolveTimeouts({
+    url: "http://x/mcp",
+    headers: { Authorization: "Bearer t", RUN_MCP_TIMEOUT_MS: "5000" },
+  });
+  expectEq("远程 headers 覆盖调用超时", remote.run, 5_000);
+  expectEq("远程未配置时默认连接超时", remote.connect, 15_000);
+}
+
+console.log("\n== applyWorkspaceFolder / resolveWorkspaceFolder：${workspaceFolder} 变量替换 ==");
+{
+  expectEq("无占位原样返回", applyWorkspaceFolder("npx"), "npx");
+  const root = resolveWorkspaceFolder();
+  expectEq("解析出工作区根（非空绝对路径）", typeof root === "string" && root.length > 0, true);
+  expectEq("占位替换为工作区根", applyWorkspaceFolder("${workspaceFolder}/plugins/mcp.js"), `${root}/plugins/mcp.js`);
+  expectEq(
+    "参数列表逐项替换",
+    JSON.stringify(applyWorkspaceFolderList(["${workspaceFolder}/a", "b"])),
+    JSON.stringify([`${root}/a`, "b"]),
+  );
+  expectEq("空列表保持 undefined", applyWorkspaceFolderList(undefined), undefined);
 }
 
 // ------------------------------------------------------------- 真实连接
@@ -203,13 +251,106 @@ console.log("\n== resolveAgentTools：默认注册表含内置 + MCP ==");
   const names = new Set(all.map((t) => t.name));
   expectEq("含内置工具", names.has("list_dir"), true);
   expectEq("含 MCP 工具", names.has("mcp__mock__hello"), true);
-  expectEq("工具总量 = 内置 + MCP", all.length, 25); // 22 内置（含 spawn_subagent/plan_propose/edit_file/find）+ 3 MCP
+  expectEq("工具总量 = 内置 + MCP", all.length, 29); // 26 内置（含 spawn_subagent/plan_propose/edit_file/find/use_skill/remember_memory/forget_memory/create_automation）+ 3 MCP
 }
 
 console.log("\n== McpClientPool：close 后状态清空 ==");
 {
   await pool.close();
   expectEq("close 后 status 为空", pool.status().length, 0);
+}
+
+// ----------------------------------------------------------- 远程 streamable HTTP
+
+console.log("\n== 远程 streamable HTTP server：连接 / 工具 / headers ==");
+{
+  // 本地起一个 streamable HTTP MCP mock server
+  const remoteSdk = new McpSdkServer(
+    { name: "prysm-remote-mock", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  remoteSdk.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: "ping",
+        title: "Ping",
+        description: "返回 pong",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+  }));
+  remoteSdk.setRequestHandler(CallToolRequestSchema, async (req) => {
+    if (req.params.name === "ping") {
+      return { content: [{ type: "text", text: "pong" }] };
+    }
+    return { content: [{ type: "text", text: `unknown: ${req.params.name}` }], isError: true };
+  });
+  const rTransport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+  });
+  await remoteSdk.connect(rTransport);
+  let seenAuth: string | undefined;
+  const httpServer = http.createServer(async (req, res) => {
+    if (req.headers.authorization) seenAuth = req.headers.authorization;
+    // GET = SSE 流（无 body）；POST = JSON-RPC 消息
+    if (req.method === "GET") {
+      await rTransport.handleRequest(req, res, undefined);
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const body = Buffer.concat(chunks).toString("utf-8");
+    // parsedBody 须为已解析对象（req 流已被消费，不能再走内部 req.json()）
+    let parsed: unknown;
+    try {
+      parsed = body ? JSON.parse(body) : undefined;
+    } catch {
+      parsed = undefined;
+    }
+    await rTransport.handleRequest(req, res, parsed as never);
+  });
+  await new Promise<void>((r) => httpServer.listen(0, "127.0.0.1", r));
+  const port = (httpServer.address() as AddressInfo).port;
+
+  // 独立池：仅远程 server
+  const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), "prysm-mcp-remote-"));
+  const mcpJson2 = path.join(tmpDir2, "mcp.json");
+  fs.writeFileSync(
+    mcpJson2,
+    JSON.stringify({
+      servers: {
+        remote: {
+          url: `http://127.0.0.1:${port}/mcp`,
+          headers: { Authorization: "Bearer test-token" },
+        },
+      },
+    }),
+    null,
+    2,
+  );
+  resetConfig();
+  resetMcpPool();
+  configure({ baseDir: tmpDir2, env: {} });
+  const rPool = getMcpPool();
+  const rStatuses = await rPool.ensureInit();
+  const remote = rStatuses.find((s) => s.name === "remote");
+  if (!remote) fail("远程 server 未出现在状态列表");
+  expectEq("远程连接成功", remote.status, "connected");
+  expectEq("传输类型 http", remote.transport, "http");
+  expectEq("url 透传", remote.url, `http://127.0.0.1:${port}/mcp`);
+
+  const rTools = await rPool.toolsOf("remote");
+  expectEq("远程工具定义", rTools.map((t) => t.name), ["ping"]);
+  const rCall = await rPool.callTool("remote", "ping", {});
+  expectEq(
+    "远程 callTool 调用成功",
+    (rCall.content?.[0] as { type: "text"; text?: string })?.text,
+    "pong",
+  );
+  expectEq("Authorization header 透传", seenAuth, "Bearer test-token");
+
+  await rPool.close();
+  httpServer.close();
 }
 
 console.log("\n✓ MCP 接入验证通过");
