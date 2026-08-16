@@ -1241,9 +1241,16 @@ export function ChatPanel() {
     [loadDir],
   );
 
-  /** 消息多选批量删除 */
+  /** 消息多选批量删除（软删，轮次级联） */
   const batchDeleteMessages = useCallback(async () => {
     if (msgSelected.size === 0 || !sessionId) return;
+    if (
+      !window.confirm(
+        `将删除选中的 ${msgSelected.size} 条消息，并连同各自后续到下一条提问前的回复一起隐藏，确定？`,
+      )
+    ) {
+      return;
+    }
     const indices = [...msgSelected].sort((a, b) => a - b);
     try {
       const res = await fetch(`/api/sessions/${sessionId}/messages`, {
@@ -1944,12 +1951,19 @@ export function ChatPanel() {
     [],
   );
 
-  /** 删除单条消息（同步会话存储与 Agent 历史） */
+  /** 删除单条消息（软删，轮次级联：连同该条之后到下一条提问前的回复一起隐藏） */
   const deleteMessage = useCallback(
     async (index: number) => {
       if (busyRef.current) return;
       const target = messages[index];
       if (!target) return;
+      if (
+        !window.confirm(
+          "删除该条将连同它之后到下一条提问前的回复一起隐藏，确定删除？",
+        )
+      ) {
+        return;
+      }
       setMessages((m) => m.filter((_, i) => i !== index));
       if (editingIndex === index) setEditingIndex(-1);
       try {

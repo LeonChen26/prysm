@@ -4,6 +4,9 @@
  *
  * 消息以 AgentMessage 的原始 JSON 存储（含 toolCall/toolResult 块），
  * 恢复时原样还原，保证 agent 上下文完整。
+ *
+ * 删除语义：单条/批量删除为软删（deleted=1 隐藏，行保留可追溯，且轮次级联）；
+ * 清空/删除会话为物理删除（真删）。
  */
 
 import { DatabaseSync } from "node:sqlite";
@@ -60,6 +63,15 @@ function getDb(): DatabaseSync {
   }
   if (!cols.some((c) => c.name === "workdir")) {
     d.exec("ALTER TABLE sessions ADD COLUMN workdir TEXT");
+  }
+  // 旧库迁移：消息软删标记列（deleted=1 的消息从读取视图隐藏，行保留可追溯）
+  const mcols = d
+    .prepare("PRAGMA table_info(session_messages)")
+    .all() as { name: string }[];
+  if (!mcols.some((c) => c.name === "deleted")) {
+    d.exec(
+      "ALTER TABLE session_messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
+    );
   }
   db = d;
   return d;
@@ -148,12 +160,12 @@ export function deleteSession(id: string): void {
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
 }
 
-/** 读取会话消息并还原为 AgentMessage[]（按写入顺序） */
+/** 读取会话消息并还原为 AgentMessage[]（按写入顺序，跳过已软删消息） */
 export function getSessionMessages(sessionId: string): AgentMessage[] {
   const d = getDb();
   const rows = d
     .prepare(
-      "SELECT content FROM session_messages WHERE session_id = ? ORDER BY id",
+      "SELECT content FROM session_messages WHERE session_id = ? AND deleted = 0 ORDER BY id",
     )
     .all(sessionId) as { content: string }[];
   const messages: AgentMessage[] = [];
@@ -178,30 +190,51 @@ export function deleteSessionMessage(
   return deleteSessionMessages(sessionId, [index]);
 }
 
-/** 批量删除会话消息（按索引，自动从大到小避免错位），返回删除后的消息列表 */
+/**
+ * 批量软删会话消息（按未删数组索引）。
+ * 轮次级联：删除点之后、下一条 user 消息之前的回复一并隐藏，
+ * 保证上下文不会出现"没有提问却有回答"的断裂。返回删除后的消息列表。
+ */
 export function deleteSessionMessages(
   sessionId: string,
   indices: number[],
 ): AgentMessage[] {
-  const messages = getSessionMessages(sessionId);
-  const sorted = [...new Set(indices)]
-    .filter((i) => Number.isInteger(i) && i >= 0 && i < messages.length)
+  const d = getDb();
+  const rows = d
+    .prepare(
+      "SELECT id, role FROM session_messages WHERE session_id = ? AND deleted = 0 ORDER BY id",
+    )
+    .all(sessionId) as { id: number; role: string }[];
+  const valid = [...new Set(indices)]
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < rows.length)
     .sort((a, b) => b - a);
-  if (sorted.length === 0) {
+  if (valid.length === 0) {
     throw new Error(`没有有效的消息索引: ${indices.join(",")}`);
   }
-  for (const i of sorted) messages.splice(i, 1);
-  saveSessionMessages(sessionId, messages);
-  return messages;
+  const toDelete = new Set<number>();
+  for (const i of valid) {
+    for (let j = i; j < rows.length; j++) {
+      // 下一条 user 消息（非删除点本身）是下一轮的起点，不在级联范围内
+      if (j > i && rows[j].role === "user") break;
+      toDelete.add(rows[j].id);
+    }
+  }
+  const upd = d.prepare("UPDATE session_messages SET deleted = 1 WHERE id = ?");
+  for (const id of toDelete) upd.run(id);
+  touchSession(sessionId);
+  return getSessionMessages(sessionId);
 }
 
-/** 全量替换会话消息（简单可靠，会话消息量经压缩控制在合理范围） */
+/** 全量替换会话消息（简单可靠，会话消息量经压缩控制在合理范围；软删行保留） */
 export function saveSessionMessages(
   sessionId: string,
   messages: AgentMessage[],
 ): void {
   const d = getDb();
-  d.prepare("DELETE FROM session_messages WHERE session_id = ?").run(sessionId);
+  // 只物理删除未软删的行，deleted=1 的历史行保留（软删可追溯，行 id 保持稳定）
+  d.prepare("DELETE FROM session_messages WHERE session_id = ? AND deleted = 0").run(
+    sessionId,
+  );
   const ins = d.prepare(
     "INSERT INTO session_messages (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
   );
@@ -230,7 +263,7 @@ export function searchSessionMessages(
       `SELECT m.session_id AS sid, s.title AS title, m.content AS content
        FROM session_messages m
        JOIN sessions s ON s.id = m.session_id
-       WHERE m.content LIKE ?
+       WHERE m.content LIKE ? AND m.deleted = 0
        ORDER BY m.id DESC
        LIMIT 300`,
     )
