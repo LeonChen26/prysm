@@ -4,7 +4,7 @@ Prysm —— **本地单用户的工作 + 编程双形态 AI 助手桌面应用*
 
 基于 [pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core) 的自主任务 Agent，可在工作区内自主读写文件、联网搜索、跨会话记忆、接入外部工具生态（MCP / Skill），支持多提供商模型路由与完整的工具审批流。
 
-核心逻辑与 UI 壳解耦：**Web（Next.js）** 与 **桌面（Electron）** 共用同一套核心 `lib/`，通过 `AgentEventBus` 事件流接入各自壳层。
+核心逻辑与 UI 壳解耦：**Web（Next.js）** 与 **桌面（Electron）** 共用同一套核心 `lib/` **与同一份前端**；桌面壳只负责拉起本地 Web 服务并用 BrowserWindow 加载（REST + SSE 全走 HTTP）。
 
 ## 两种形态
 
@@ -21,7 +21,7 @@ Prysm —— **本地单用户的工作 + 编程双形态 AI 助手桌面应用*
 
 ## 桌面形态（Electron）
 
-`npm run electron:dev` 启动桌面应用。核心迁入主进程（`baseDir = app.getPath('userData')`），渲染进程通过 IPC 通信、`prysm:event` 事件流推送。支持打包安装与自动更新（见「打包分发」）。
+`npm run electron:dev` 启动桌面应用。**复用 Web 前端**：主进程拉起 Next.js 服务（开发 `next dev` / 打包 standalone `server.js`），BrowserWindow 加载 `http://127.0.0.1:30123`；数据基准经 `PRYSM_BASE_DIR=userData` 注入，所有 DB / 配置 / 技能落于用户数据目录。支持打包安装与自动更新（见「打包分发」）。
 
 ## 功能特性
 
@@ -51,7 +51,7 @@ Prysm —— **本地单用户的工作 + 编程双形态 AI 助手桌面应用*
 - 主 agent 先产出结构化计划（步骤 + 涉及工具 + 预期），UI 渲染为可确认卡片，**用户确认后才执行**
 - 与审批流独立：审批是「工具调用时」逐次确认，Plan mode 是「执行前」一次性确认
 - 支持批准 / 拒绝 / 取消，超时视为拒绝；计划持久化到 `plans.db`
-- Web 与 Electron 均支持计划卡片渲染
+- Web 与桌面（共用同一前端）均支持计划卡片渲染
 
 ### 多模态输入
 
@@ -75,19 +75,22 @@ Prysm —— **本地单用户的工作 + 编程双形态 AI 助手桌面应用*
 ### 安全 / 审批 / 审计
 
 - **工具审批**：敏感操作（写文件 / 删文件 / 执行命令）先征求用户确认，审批卡片位于对话窗内并带风险分级与倒计时；支持白名单自动放行与黑名单强制拦截
-- **策略规则化**：白/黑名单（工具 / 路径 / 命令）+ 审批超时可持久化到 `prysm.db` 并可视化管理
+- **策略规则化**：工具 / 路径白黑名单（支持 `mcp__*` / `skill__*` 通配）、命令规则（allow / ask / deny）、审批超时统一存于 `<baseDir>/permission/global.json`，设置面板「审批」Tab 可视化管理
+- **权限模式**：手动审批 / 自动审批（LLM Guardian 决策）/ 完全访问 / 自定义，一键切换并持久化
 - **审批历史审计**：每次审批决定（同意 / 拒绝 / 超时 / 策略拦截 / 自动放行）持久化到 `audit.db`，侧栏可筛选（工具 / 动作）、分页、查看与清空；敏感参数自动脱敏
 
 ### MCP & Skill
 
-- **MCP**：接入官方 `@modelcontextprotocol/sdk`，支持 **tools + resources + prompts**；stdio 传输先行；`mcp.json` 声明 server；连接状态与工具清单可视化；崩溃降级 + 自动重连
-- **Skill**：`skills/<name>/SKILL.md`（frontmatter + 正文），会话级启用 / 禁用 / 热加载；启用 skill 的提示词与工具动态注入
+- **MCP**：接入官方 `@modelcontextprotocol/sdk`，支持 **tools + resources + prompts**；传输支持 **stdio（本地子进程）+ streamable HTTP + SSE（远程）**，远程 server 可配置 `url` / `headers`（如 Bearer 鉴权）；连接 / 调用超时（`START_MCP_TIMEOUT_MS` / `RUN_MCP_TIMEOUT_MS`）与 `${workspaceFolder}` 变量替换；设置面板管理 server（传输类型切换、参数编辑）；连接状态与工具清单可视化；崩溃降级 + 自动重连
+- **Skill**：`skills/<name>/SKILL.md`（frontmatter + 正文）；**按需加载**——系统提示词仅注入名称/描述索引，模型判断任务相关时经 `use_skill` 工具加载正文；项目技能 `<baseDir>/skills` + 全局技能 `~/.prysm/skills` 双目录（同名项目优先），全局目录不可写时自动回退并持久化；会话级启用 / 禁用 / 热加载，`/skill <名称> [任务]` 手动调用
 
 ### 记忆与数据
 
 - **情景记忆**：跨会话检索历史 episode，自动注入相关上下文（SQLite 持久化于 `agent-memory.db`），侧栏可查看 / 删除 / 清空
+- **偏好记忆**：对话中 `remember_memory` / `forget_memory` 显式记住 / 更新 / 删除偏好与规则（scope 全局 / 项目），全局 `memory/user_profile.md` + 项目 `memory/projects/<workdir>/project_memory.md`，注入系统提示词跨会话生效；设置面板「数据」Tab 可视化编辑
+- **定时任务（自动化）**：按固定间隔 / 固定时间（每天 / 每周 / 每月 cron）自动执行预设任务并生成结果，无需人工干预；对话中 `create_automation` 自然语言创建；左栏「自动化」面板管理（启停 / 立即运行 / 编辑删除 / 执行历史跳转 / 任务模板）；每次执行生成独立会话可回看对话流
 - **待办清单**：任务拆解为步骤卡片，支持拖拽排序 / 删除 / 追加，实时进度与耗时；持久化到 `todo.db`
-- **数据备份恢复**：一键导出 / 导入全部会话、记忆与任务计划（侧栏「备份 / 恢复」）
+- **数据备份恢复**：一键导出 / 导入会话、记忆（情景 + 偏好）、任务计划与定时任务（侧栏「备份 / 恢复」）
 
 ### 会话与消息
 
@@ -159,7 +162,7 @@ npm run dev
 核心与 Web 共用，无需额外配置模型即可使用（读取同一 `.env.local`）：
 
 ```bash
-npm run electron:dev     # 编译主进程/preload 并启动桌面应用
+npm run electron:dev     # 编译主进程并启动桌面应用（自动复用/拉起 next dev）
 ```
 
 ## 生产构建与部署（Web）
@@ -195,7 +198,7 @@ pm2 start .next/standalone/server.js --name prysm
 
 | 命令 | 说明 |
 | --- | --- |
-| `npm run electron:build` | 仅编译主进程 / preload（esbuild → `dist-electron/`） |
+| `npm run electron:build` | 仅编译主进程（esbuild → `dist-electron/main.cjs`） |
 | `npm run dist` | 构建当前平台安装包（不发布） |
 | `npm run dist:win` / `dist:mac` / `dist:linux` | 构建指定平台安装包（不发布） |
 | `npm run release` | 构建并发布到 GitHub Releases（需 `GH_TOKEN`） |
@@ -240,9 +243,13 @@ pm2 start .next/standalone/server.js --name prysm
 | `GET /api/workspaces` | 全部工作区（含授权状态） |
 | `POST /api/workspaces` | 新增工作区（`{ root, name? }`） |
 | `POST /api/workspaces/[id]/authorize` | 授权 / 撤销工作区（`{ authorized: bool }`） |
-| `GET /api/mcp` | MCP 连接状态与工具清单 |
+| `GET /api/mcp` | MCP 服务器列表与连接状态；POST 增删（stdio / http / sse） |
 | `GET /api/skills` | 全部已登记技能（含 enabled 状态） |
 | `POST /api/skills` | 启用 / 禁用 / 重载技能（`{ name, action }`） |
+| `GET /api/automations` | 定时任务列表与执行历史 |
+| `POST /api/automations` | 定时任务操作（create / update / toggle / delete / run） |
+| `GET /api/memory-files` | 偏好记忆文件内容（全局 / 项目） |
+| `POST /api/memory-files` | 保存 / 重置偏好记忆（`{ action: "save"\|"reset" }`） |
 | `GET /api/permission` | 权限与审批配置（permission.json）及配置文件路径 |
 | `POST /api/permission` | 保存完整配置（`{ config }`）或切换模式（`{ activeMode }`） |
 | `GET /api/plans?sessionId=xxx&id=yyy` | 未决计划列表 / 单个计划（Plan mode） |
@@ -273,6 +280,9 @@ pm2 start .next/standalone/server.js --name prysm
 | `RAG_SCAN_LIMIT` | `2000` | 单次扫描处理的最大文件数 |
 | `PRYSM_AUTO_UPDATE` | - | 桌面版自动更新开关（`1` 启用，仅打包版生效） |
 | `PRYSM_UPDATE_URL` | - | 桌面版自动更新源覆盖（自建服务器） |
+| `PRYSM_LLM_JUDGE` | - | LLM-as-Judge 自动评分开关（`1` 启用，每次运行后主模型打分 0-10） |
+| `START_MCP_TIMEOUT_MS` | `15000` | MCP 连接超时（stdio 读 env / 远程读 headers） |
+| `RUN_MCP_TIMEOUT_MS` | `60000` | MCP 工具 / 资源 / prompt 调用超时 |
 | `PORT` | `3000` | standalone 产物监听端口 |
 | `HOSTNAME` | - | standalone 产物绑定地址（如 `0.0.0.0`） |
 
@@ -287,7 +297,10 @@ pm2 start .next/standalone/server.js --name prysm
 | `audit.db` | 审批历史审计（SQLite） |
 | `plans.db` | Plan mode 计划持久化（SQLite） |
 | `agent-rag.db` | 知识库 / RAG 索引（SQLite + FTS5） |
-| `prysm.db` | 配置与授权类数据集中管理（工作区 / 策略 / 模型路由） |
+| `prysm.db` | 工作区 / 模型路由等配置（SQLite） |
+| `automations.db` | 定时任务配置与执行历史（SQLite） |
+| `permission/` | 审批 / 权限配置（`global.json`，单一事实来源） |
+| `memory/` | 偏好记忆（全局 `user_profile.md` + 各项目 `project_memory.md`） |
 
 > Web 形态下位于构建 / 运行目录；桌面形态下位于 `userData` 目录。部署时注意持久化挂载。
 
@@ -300,18 +313,23 @@ lib/                  # 核心逻辑（框架无关，纯 TS/Node，Web 与 Elec
   config.ts           # 配置注入
   agent.ts            # Agent 底座（基于 pi-agent-core）
   tools.ts            # 内置工具定义
+  tool-meta.ts        # 工具元数据（label/type/surface/capability/sensitive）
   tools/              # 工具注册表 + 内置 / MCP / Skill provider
+  skills.ts           # Skill 加载（索引 / 双目录 / 回退）与 use_skill
   plan.ts             # Plan mode
   subagent.ts         # 子 agent 编排
   model-router.ts     # 多模型路由
   rag.ts              # 知识库 / RAG
   workspace.ts        # 多工作区模型
   policy.ts / risk.ts # 安全策略 / 风险分级
+  permission.ts / approval-policy.ts / guardian.ts  # 权限配置 / 审批决策链 / LLM Guardian
   approval.ts / audit.ts  # 审批流 / 审计
   sessions.ts / memory.ts / todo.ts  # 会话 / 记忆 / 待办持久化
+  preference-memory.ts# 偏好记忆（全局 + 项目 markdown）
+  automation.ts / cron.ts / scheduler.ts  # 定时任务（数据层 / cron 解析 / 调度器）
 app/api/              # Web 路由（REST + SSE）
 components/           # Web 前端组件（ChatPanel 等）
-electron/             # 桌面壳（主进程 / preload / 渲染页）
+electron/             # 桌面壳（主进程：拉起 Web 服务 + BrowserWindow 加载；esbuild → main.cjs）
 docs/                 # 架构蓝图与分发文档
 tests/                # unit / web / e2e 测试
 ```
@@ -320,7 +338,7 @@ tests/                # unit / web / e2e 测试
 
 ```bash
 npm run typecheck     # TypeScript 类型检查
-npm run test:unit     # 31 个离线单测（工具/审批/审计/工作区/MCP/Skill/模型路由/子agent/RAG/多模态/Plan/桌面壳等）
+npm run test:unit     # 37 个离线单测（工具/审批/审计/工作区/MCP/Skill/模型路由/子agent/RAG/多模态/Plan/定时任务/桌面壳等）
 npm run test:web      # 联网搜索与网页抓取
 npm run test:e2e      # 端到端测试（需先启动 npm run dev）
 ```

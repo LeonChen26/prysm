@@ -115,7 +115,10 @@ export interface PrysmCore {
 
 export function createCore(config: PrysmConfig): PrysmCore {
   // 注入运行时配置：路径基准 + 环境变量 + 默认模型等
-  configure(config);
+  // PRYSM_BASE_DIR：桌面壳（Electron）注入 userData，使 Web 后端（Next.js server 子进程）数据落于用户数据目录；
+  // Web 形态无该 env，行为不变。
+  const baseDir = process.env.PRYSM_BASE_DIR ?? config.baseDir;
+  configure({ ...config, baseDir });
   // Phase 3：MCP 池配置注入（显式指定 mcp.json 时使用；否则惰性读取 <baseDir>/mcp.json）
   if (config.mcpConfigPath) configureMcp(config.mcpConfigPath);
 

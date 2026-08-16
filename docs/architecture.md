@@ -13,11 +13,11 @@
 
 ```
 ┌─────────────────────────────────────────┐
-│  壳（可替换）                            │
-│  现在：Next.js Web       未来：Electron    │
+│  壳（前端 + 桌面）                        │
+│  Next.js Web 与 Electron 桌面共用同一前端 │
 ├─────────────────────────────────────────┤
 │  通信层（抽象：AgentEventBus）            │
-│  现在：SSE              未来：IPC/本地事件流 │
+│  现在：SSE              桌面版沿用 HTTP+SSE│
 ├─────────────────────────────────────────┤
 │  核心（框架无关，纯 TS/Node，复用不变）   │
 │  Agent 底座 · 工具/能力层 · 安全审批层    │
@@ -27,7 +27,7 @@
 **硬性约束**：
 
 1. 从 Phase 1 起，`lib/` 下所有核心模块（registry / mcp / skill / subagent / agent / risk / policy / approval / audit / paths / workdir）保持**零 Next.js 依赖**，只依赖 `pi-agent-core` 与 Node 内置。
-2. **核心模块逐步参数化，最终不依赖 `process.cwd()` 和 `process.env` 直读**：路径基准通过 `baseDir` 参数注入（Web 传 `process.cwd()`，Electron 传 `app.getPath('userData')`）；配置数据通过注入的 data source（DB / config 对象）传入。允许在 Phase 2 前保留 env 兼容构造器，以保障测试与路由稳定过渡。
+2. **核心模块逐步参数化，最终不依赖 `process.cwd()` 和 `process.env` 直读**：路径基准通过 `baseDir` 参数注入（Web 传 `process.cwd()`，桌面版由 Electron 壳经 `PRYSM_BASE_DIR=userData` 环境变量注入 Web 后端子进程）；配置数据通过注入的 data source（DB / config 对象）传入。允许在 Phase 2 前保留 env 兼容构造器，以保障测试与路由稳定过渡。
 3. **`AgentEventBus` 事件契约在 Phase 1a.2 定义**（接口先行），Phase 1b–7 通过路由层 adapter 桥接现有双通道，Phase 7.5 再替换为核心层直连 bus。
 
 ## 2. 总体分层：复用 vs 新建
@@ -48,13 +48,15 @@
 // lib/core.ts
 export interface PrysmConfig {
   baseDir: string;                       // 路径基准：Web=process.cwd(), Electron=userData
-  env?: NodeJS.ProcessEnv;               // 兼容期，Phase 2 前用于 policy/approval/model 默认值
+  env?: NodeJS.ProcessEnv;               // 兼容期 env 读取（经 config.envValue 统一代理）
   defaultProvider?: string;              // 默认模型 provider
   defaultModel?: string;                 // 默认模型 ID
-  approvalTimeoutMs?: number;            // 审批超时
   allowedRoots?: string[];               // 多工作区根（兼容 env，Phase 1b 后优先 workspace 表）
-  skillsDir?: string;                    // skill 扫描目录
+  skillsDir?: string;                    // 项目 skill 扫描目录（缺省 <baseDir>/skills）
+  globalSkillsDir?: string;              // 全局技能目录（缺省 ~/.prysm/skills）
   mcpConfigPath?: string;                // mcp.json 路径
+  modelRoutes?: Partial<Record<ModelRole, ModelRoute>>; // 模型路由注入（优先于 model_route 表）
+  disableScheduler?: boolean;            // 定时任务调度器：置 true 关闭自动启动（测试用）
 }
 
 export interface PrysmCore {
@@ -71,7 +73,7 @@ export function createCore(config: PrysmConfig): PrysmCore;
 ```
 
 - Web 路由 `app/api/agent/route.ts` 启动时调用 `createCore({ baseDir: process.cwd(), env: process.env })`。
-- Electron 主进程调用 `createCore({ baseDir: app.getPath('userData') })`。
+- 桌面版：Electron 主进程拉起 Next.js 服务并注入 `PRYSM_BASE_DIR=userData`，`lib/core.ts` 的 `createCore` 读取该环境变量作为 `baseDir`（见 `createCore` 内 `process.env.PRYSM_BASE_DIR ?? config.baseDir`），服务子进程内与 Web 完全同构。
 - 现有模块级函数（`getAgent`/`createSession`/...）在 Phase 1a.3 改为从 `PrysmCore` 实例暴露，避免全局单例。
 
 ## 4. 数据模型
@@ -120,15 +122,15 @@ class ToolRegistry {
 - `resolve(filter)` 在 Phase 1a.1 预留接口，Phase 5 子 agent 用它筛选只读 / 读写工具集，避免返工。
 - **注册时机：静态注册**。registry 在会话/Agent 构造时一次性 resolve；**不使用** `pi-agent-core` 的 `addedToolNames` 运行时动态添加工具机制（保持简单，后续有需要再议）。
 
-三个 provider：`BuiltinToolProvider`（现有 18 工具原样迁入）、`McpToolProvider`、`SkillToolProvider`。
+三个 provider：`BuiltinToolProvider`（现有 26 工具原样迁入）、`McpToolProvider`、`SkillToolProvider`。
 
 命名与元数据：
 
 - 内置工具保留原名；MCP 工具 `mcp__<server>__<tool>`；Skill 工具 `skill__<name>__<tool>`。
-- `TOOL_META`（`lib/tool-meta.ts`，当前仅 `{ label, type }`）迁移为 `{ label, type, surface?, sensitive?, capability? }`：将 `agent.ts` 中硬编码的 `SENSITIVE_TOOLS` 集合迁入 `sensitive`，新增 `surface` 指导前端渲染与工具集筛选，`capability`（readonly/readwrite）供子 agent 筛选。
-- **Phase 1a.1 需对现有 18 工具逐一标记 `capability`**：
-  - `readonly`：`list_dir` / `read_file` / `verify_file` / `search_files` / `web_search` / `fetch_url` / `env_info` / `port_check` / `todo_create` / `todo_modify` / `todo_list`
-  - `readwrite`：`write_file` / `append_file` / `create_dir` / `move_file` / `copy_file` / `delete_file` / `run_bash`
+- `TOOL_META`（`lib/tool-meta.ts`）现为 `{ label, type, surface?, sensitive?, capability? }`：`SENSITIVE_TOOLS` 已迁入 `sensitive`；`surface` 指导前端渲染与工具集筛选；`capability`（readonly/readwrite）供子 agent 筛选。
+- **Phase 1a.1 已对当前 26 个内置工具逐一标记 `capability`**：
+  - `readonly`：`list_dir` / `read_file` / `verify_file` / `search_files` / `find` / `web_search` / `fetch_url` / `env_info` / `port_check` / `todo_create` / `todo_modify` / `todo_list` / `plan_propose` / `use_skill` / `remember_memory` / `forget_memory` / `create_automation`
+  - `readwrite`：`write_file` / `append_file` / `edit_file` / `create_dir` / `move_file` / `copy_file` / `delete_file` / `run_bash` / `spawn_subagent`
 
 ### 5.1 `spawn_subagent` 与循环依赖
 
@@ -234,6 +236,8 @@ beforeToolCall
 
 扩展：
 
+> 下列扩展项 1–7 均已落地（对应路线表 Phase 1a.1 / 2 的 ✅ 完成标记）：目录级授权、`resolveInWorkdir` 返回 `ResolveResult`、策略迁入 `permission/global.json`、`mcp__*` / `skill__*` 通配、`SENSITIVE_TOOLS` 迁入 `TOOL_META.sensitive`、审批超时随策略配置。
+
 1. **目录级授权 + 默认拒绝**（类 Claude Desktop）：首次访问某目录/命令需授权，可记住授权；新增持久化「授权表」（`prysm.db`）替代/增强 `APPROVAL_*` env 白名单。
 2. **`paths.ts` 接口变更（Phase 2 前置）**：`resolveInWorkdir` 当前越界直接 `throw`，需改为返回结构化结果（`{ ok } | { ok: false, needsAuthorization, root }`），让上层走授权/审批流而非崩溃。所有调用方（`tools.ts` / `workdir.ts`）同步适配。
 3. **`policy.ts` 数据源注入（Phase 1a.3/2）**：当前 `parse()` 在模块加载时直读 `process.env`，`cached` 模块级缓存。需改为通过 `PrysmConfig` 初始化，并支持运行时 reload（Phase 2 从 `prysm.db` 读取）。保留 env 兼容构造器供测试，但路由使用注入配置。
@@ -249,20 +253,21 @@ beforeToolCall
 | 壳 | 适配方式 |
 | --- | --- |
 | Web（现在） | SSE 长连接 |
-| Electron（未来） | IPC / 主进程↔渲染进程事件流 |
+| Electron 桌面 | 复用 Web 前端，SSE 经 HTTP 直传（BrowserWindow 加载 http://127.0.0.1:<port>） |
 
 - **统一双通道**：现有代码有**两套独立事件系统**——`UiEvent`（`agent.ts:288`，`mapEvent(AgentEvent)` 映射，含 `turn_start`/`delta`/`tool_start`/`tool_end`/`turn_end`/`agent_end`）和 `ApprovalLifecycleEvent`（`approval.ts:34`，`subscribeApprovalLifecycle` 订阅，含 `required`/`resolved`/`expired`/`notice`）。`AgentEventBus` **统一两套通道**为单一事件流，审批事件映射为 `approval_request`/`approval_resolved`/`approval_expired`/`approval_notice`。
+- **后续扩展**：`BusEvent`（`lib/events.ts`）现已并入 `PlanEvent`（`plan_proposed`/`plan_decided`/`plan_cancelled`）与 `AutomationEvent`（`automation_run`，定时任务调度器 emit），事件均纯 JSON 可序列化。
 - **分阶段替换**：
   - Phase 1a.2：定义 `AgentEventBus` 接口；在 `app/api/agent/route.ts` 里用 **bus adapter** 把 `agent.subscribe(mapEvent)` 和 `subscribeApprovalLifecycle` 桥接成 bus 事件发出。核心层不动，只有路由层适配。
   - Phase 7.5：核心层直接通过 bus emit，移除 adapter，SSE 行为不变。
 - **事件命名对齐**：`tool_start`/`tool_end` 保留不变；审批事件统一加 `approval_*` 前缀。
-- **跨进程状态同步（Phase 8 前置）**：`approval.ts` 的 `pending`/`listeners`/`lifecycleListeners` 全是模块级内存态。Web 单进程无问题；Electron 主进程→渲染进程需经 IPC 序列化传递审批事件。Phase 7.5 落地时确保所有事件可序列化（无函数引用、无循环结构），`AgentEventBus` 在 Electron 侧做 IPC 适配。
+- **跨进程状态同步（已解决）**：`approval.ts` 的 `pending`/`listeners`/`lifecycleListeners` 全是模块级内存态。桌面版不再走 IPC——Electron 主进程与 Web 后端同机，BrowserWindow 直接消费 HTTP+SSE，审批事件天然经 SSE 到达渲染层，无需 IPC 序列化适配。
 
 ## 9. UI 壳
 
 - **短期（Web 迭代）**：同一 Agent 会话按 `surface` 切视图——Work 视图（任务流、审批卡片、MCP 工具面板）、Coding 视图（diff、终端、文件树、测试结果）。
-- **长期（桌面壳）**：核心 + 前端组件不变，仅换壳为 **Electron**；核心 + MCP stdio 迁入主进程。
-- 桌面形态下 MCP stdio 成为首选传输，文件/命令工具不再受浏览器沙箱限制。
+- **长期（桌面壳，已落地）**：**Electron 复用 Web 前端**——主进程拉起 Next.js 服务（开发 `next dev` / 打包 standalone `server.js`），`BrowserWindow` 加载 `http://127.0.0.1:<port>`，REST + SSE 全走 HTTP，前端零改动；主进程仅负责拉起服务、自动更新、外链打开。
+- 桌面形态下文件/命令工具不受浏览器沙箱限制；MCP stdio 作为主进程子进程由 Web 后端统一管理。
 
 ## 10. 配置体系
 
@@ -291,18 +296,18 @@ beforeToolCall
 
 | Phase | 内容 | 依赖 | 验收 |
 | --- | --- | --- | --- |
-| 1a.1 | 工具注册表抽象 + 18 工具 `capability` 标记 + `TOOL_META.sensitive` 迁移 + `spawn_subagent` 占位 | — | test 全绿、行为不变、`resolve(filter)` 接口预留 |
-| 1a.2 | `AgentEventBus` 接口定义 + 路由层 bus adapter（桥接 `mapEvent` + `subscribeApprovalLifecycle`，核心层不动） | 1a.1 | SSE 行为不变、事件命名统一 |
-| 1a.3 | Core 工厂 `createCore(config)` + `baseDir` 参数化 + 去除 `process.env` 直读（policy/approval/model/paths）+ 保留 env 兼容构造器 | 1a.2 | Web 路由改用 core 实例、test 全绿、无模块级 cwd/env 依赖 |
-| 1b | 多工作区数据模型 + `paths.ts`/`workdir.ts` 改造 + `SYSTEM_PROMPT` 动态化 + env 一次性导入 + `sessions` 表加 `surface` 列 | 1a.3 | 支持多 project 根、文件浏览器多根可用、提示词含实际工作区路径 |
-| 2 | 安全层升级：`resolveInWorkdir` 返回授权结果 + 目录授权（默认拒绝）+ `policy.ts` 数据源迁移 SQLite（`prysm.db`）+ policy 通配 + `approval.ts` 配置化 | 1b | 越界目录默认拒绝并触发授权、策略可持久化/可视化、无 env 直读 |
-| 3 | MCP 全量（tools+resources+prompts，stdio 先行） | 1a.1、2 | MCP 三能力接入、敏感走授权、崩溃可降级 |
-| 4 | Skill 机制（SKILL.md + 动态注入 SYSTEM_PROMPT + 工具） | 1a.1 | skill 启用后生效、工具可调用 |
-| 5 | 子 agent 编排（`spawn_subagent` 延迟注入打破循环依赖）+ 多模型路由（`ensureModels`→注册表、`PROVIDER_FACTORIES`→动态、`getAgent`→按 config/表选取） | 3、4 | 派生只读/执行子 agent、审批回传、小模型降本 |
-| 6 | 多模态输入 + 知识库/RAG（`buildContext` 注入顺序：压缩→记忆→RAG） | 1b、3 | 图片/附件输入（落盘会话 workspace）、MCP image 渲染、文档检索注入 |
+| 1a.1 | 工具注册表抽象 + 18 工具 `capability` 标记 + `TOOL_META.sensitive` 迁移 + `spawn_subagent` 占位 | — | **✅ 完成** —— `lib/tools/registry.ts` + `lib/tool-meta.ts`（surface/capability/sensitive）+ `spawn_subagent` |
+| 1a.2 | `AgentEventBus` 接口定义 + 路由层 bus adapter（桥接 `mapEvent` + `subscribeApprovalLifecycle`，核心层不动） | 1a.1 | **✅ 完成** —— `lib/events.ts`（`SimpleEventBus`，BusEvent 统一四类事件） |
+| 1a.3 | Core 工厂 `createCore(config)` + `baseDir` 参数化 + 去除 `process.env` 直读（policy/approval/model/paths）+ 保留 env 兼容构造器 | 1a.2 | **✅ 完成** —— `lib/core.ts` `createCore` + `lib/config.ts`（`configure` / `basePath` / `envValue`） |
+| 1b | 多工作区数据模型 + `paths.ts`/`workdir.ts` 改造 + `SYSTEM_PROMPT` 动态化 + env 一次性导入 + `sessions` 表加 `surface` 列 | 1a.3 | **✅ 完成** —— `lib/workspace.ts` + `sessions.surface` 列 + 目录授权 |
+| 2 | 安全层升级：`resolveInWorkdir` 返回授权结果 + 目录授权（默认拒绝）+ 策略数据源迁移（最终落 `permission/global.json`）+ policy 通配 + `approval.ts` 配置化 | 1b | **✅ 完成** —— `resolveInWorkdir` 返回 `ResolveResult`；策略迁入 `permission/global.json`（`lib/permission.ts`）；`mcp__*` / `skill__*` 通配；权限模式（manual/auto/full/custom + LLM Guardian） |
+| 3 | MCP 全量（tools+resources+prompts，stdio 先行） | 1a.1、2 | **✅ 完成** —— stdio + streamable HTTP + SSE 三传输、`START/RUN_MCP_TIMEOUT_MS` 超时、`${workspaceFolder}` 替换 |
+| 4 | Skill 机制（SKILL.md + 动态注入 SYSTEM_PROMPT + 工具） | 1a.1 | **✅ 完成** —— 按需加载（`buildSkillIndex` + `use_skill`）、项目/全局双目录、不可写回退 |
+| 5 | 子 agent 编排（`spawn_subagent` 延迟注入打破循环依赖）+ 多模型路由（`ensureModels`→注册表、`PROVIDER_FACTORIES`→动态、`getAgent`→按 config/表选取） | 3、4 | **✅ 完成** —— `lib/subagent.ts` + `lib/model-router.ts`（`modelRoutes` 注入优先于表） |
+| 6 | 多模态输入 + 知识库/RAG（`buildContext` 注入顺序：压缩→记忆→RAG） | 1b、3 | **✅ 完成** —— 图片/附件输入（落盘会话 workspace）+ MCP image 渲染 + `lib/rag.ts`（SQLite FTS5 / BM25，无外部嵌入模型） |
 | 7 | Plan mode + UI 分化（work/coding 视图） | 1a.1、3、4、5 | **✅ 完成** —— `lib/plan.ts`（propose/decide/cancel/超时/持久化）、`plan_propose` 工具、前端计划卡片与图片渲染、work/coding 视图 |
 | 7.5 | 通信层落地（核心层直接 emit `AgentEventBus`，移除路由 adapter，审批事件可序列化） | 7 | **✅ 完成** —— `createCore` 内 agent/approval/plan 直接注入共享 bus（带 sessionId 供按会话隔离），路由只订阅 bus 做 SSE 传输，事件均纯 JSON 可序列化 |
-| 8 | 桌面壳（Electron） | 1–7.5 | **✅ 完成** —— `electron/` 主进程（`baseDir=userData`、IPC 桥、事件流 `prysm:event`）、preload contextBridge、静态渲染页、esbuild 打包、`npm run electron:dev` 启动 |
+| 8 | 桌面壳（Electron） | 1–7.5 | **✅ 完成** —— 复用 Web 前端：主进程拉起 Next.js 服务（开发 `next dev` / 打包 `standalone server.js` + `ELECTRON_RUN_AS_NODE`），BrowserWindow 加载 `http://127.0.0.1:30123`；数据经 `PRYSM_BASE_DIR=userData` 注入；esbuild 输出 CJS（`external: ["electron","electron-updater"]`）；`electron-builder` extraResources 打包 standalone；自动更新受 `PRYSM_AUTO_UPDATE` 门控 |
 
 ## 13. 决策汇总
 
@@ -331,16 +336,19 @@ beforeToolCall
 | 多模态输入 | 图片/附件输入 + MCP image 渲染 | 6 |
 | 知识库 / RAG | 项目文档检索增强，与情景记忆并列 | 6 |
 | 多模型路由 | 强模型编排、小模型执行，子 agent 默认小模型 | 5 |
+| 偏好记忆 | 显式偏好/规则 markdown 持久化，注入系统提示词跨会话生效 | 6.7 |
+| 定时任务（自动化） | 固定时间/间隔自动执行预设任务并生成结果 | 6.8 |
+| 审批策略体系 | 权限模式 + 资源授权（工具/路径/命令）+ LLM Guardian 决策链 | 2 |
 
 ## 15. 工程默认方案
 
-- **打包/分发**：Electron Builder + 签名 + `electron-updater` 自动更新，Win/Mac/Linux 三平台。
-- **测试**：核心沿用 `test:unit` 纯 TS 单测；MCP 用 mock server 测；桌面壳用 Playwright；Web session 数据用一次性迁移脚本导入桌面 SQLite。
+- **打包/分发**：Electron Builder + 签名 + `electron-updater` 自动更新（`PRYSM_AUTO_UPDATE=1` 门控，`PRYSM_UPDATE_URL` 可覆盖更新源），Win/Mac/Linux 三平台。
+- **测试**：核心沿用 `test:unit` 纯 TS 单测；MCP 用 mock server 测；桌面壳用静态一致性检查（`test-electron.ts`）+ 冒烟启动；Web session 数据用一次性迁移脚本导入桌面 SQLite。
 - **pi-coding-agent**：不整体引入（终端 TUI 与桌面/Web 形态冲突、职责重叠），只借鉴其 SKILL.md 格式与 Extension 注册工具的思路。
 - **降级策略**：MCP 崩溃 → 工具标记不可用 + 自动重连；子 agent 超时 → 返回部分结果；模型路由失败 → 回退主模型。各模块独立降级，不整体卡死。
-- **Electron 主进程 ESM**：`package.json` 已设 `"type": "module"`，Electron 主进程可直接使用 ESM 加载核心；渲染进程复用 Next.js/React 前端组件，通过 IPC 与主进程通信。
+- **Electron 主进程构建**：esbuild 输出 **CJS**（`main.cjs`）——ESM 输出下 electron-updater 内部 `require("child_process")` 会触发 "Dynamic require" 崩溃；`external: ["electron","electron-updater"]`（bundle 进 electron 会拿到二进制路径字符串而非 API，electron-updater 顶层副作用会触发 spawn 崩溃）；开发/打包判定用 `process.defaultApp`（部分环境下 `app.isPackaged` 误判 true）。
 
-## 16. 遗留决策点（Phase 6 前敲定）
+## 16. 遗留决策点（已解决）
 
-- RAG 索引策略：全量 vs 增量；索引存储位置（建议随 workspace 存 `prysm.db` 或独立索引文件）；嵌入模型选型（本地 vs API）。
-- Plan mode 确认交互细节：是否支持编辑/跳过步骤、是否允许部分确认、失败后回退策略。
+- ~~RAG 索引策略~~：已落地为 SQLite FTS5 + BM25 关键词匹配（中文按字符分词），增量扫描已授权工作区（按 mtime+size 跳过未变更），无需外部嵌入模型；索引存独立 `agent-rag.db`。
+- ~~Plan mode 确认交互细节~~：已支持批准 / 拒绝 / 取消（超时视为拒绝），计划持久化 `plans.db`，Web 与 Electron 均可渲染计划卡片。

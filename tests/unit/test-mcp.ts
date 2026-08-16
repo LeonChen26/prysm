@@ -350,11 +350,17 @@ console.log("\n== 远程 streamable HTTP server：连接 / 工具 / headers ==")
   expectEq("Authorization header 透传", seenAuth, "Bearer test-token");
 
   await rPool.close();
-  httpServer.close();
+  // 关闭 HTTP 服务器并断开 keep-alive 连接：避免 Node 24 在 process.exit 清理残留 socket 时触发 libuv 断言崩溃
+  await new Promise<void>((resolve) => {
+    httpServer.closeAllConnections?.();
+    httpServer.close(() => resolve());
+  });
 }
 
 console.log("\n✓ MCP 接入验证通过");
 resetConfig();
 resetMcpPool();
 resetToolRegistry();
-process.exit(0);
+// 不调用 process.exit：池与 HTTP 服务器均已关闭，事件循环自然退出。
+// 显式 exit 在残留 libuv handle（远程 HTTP keep-alive / 子进程 stdio）时，
+// Node 24 Windows 会触发 "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" 崩溃。

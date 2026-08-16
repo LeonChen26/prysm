@@ -11,10 +11,16 @@ directories:
 # 复用本机已下载的 Electron 发行版，避免 electron-builder 重新下载到系统缓存（沙箱/离线环境可用）
 electronDist: node_modules/electron/dist
 
-# 主进程已由 esbuild 打包为自包含 ESM，仅需 dist-electron + 元数据
+# 主进程已由 esbuild 打包为自包含 CJS，仅需 dist-electron + 元数据
 files:
   - dist-electron/**
   - package.json
+
+# 前端与核心为 Next.js 应用：standalone 产物放 asar 之外（ELECTRON_RUN_AS_NODE 纯 Node 运行 server.js，
+# asar 内的虚拟文件系统对子进程不可见），主进程从 process.resourcesPath/web/server 拉起。
+# 复制由 after-pack.cjs 完成：electron-builder 的 extraResources 会排除 node_modules，
+# 而 standalone 依赖 next 等运行时包（filter 无法覆盖该排除）。
+afterPack: electron/after-pack.cjs
 
 asar: true
 

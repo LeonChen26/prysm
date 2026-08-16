@@ -29,14 +29,20 @@
 
 | 命令 | 作用 |
 |------|------|
-| `npm run electron:build` | 仅编译主进程/preload（esbuild → `dist-electron/`） |
-| `npm run dist` | 构建当前平台安装包（不发布） |
-| `npm run dist:win` / `dist:mac` / `dist:linux` | 构建指定平台安装包（不发布） |
-| `npm run release` | 构建并发布到 GitHub Releases（当前平台，需 `GH_TOKEN`） |
-| `npm run release:github` | 构建并发布 Windows 安装包到 GitHub Releases（需 `GH_TOKEN`） |
+| `npm run electron:build` | 仅编译主进程（esbuild → `dist-electron/main.cjs`） |
+| `npm run dist` | `next build` + 编译主进程 + 构建当前平台安装包（不发布） |
+| `npm run dist:win` / `dist:mac` / `dist:linux` | 同 dist，构建指定平台安装包（不发布） |
+| `npm run release` | `next build` + 编译主进程 + 构建并发布到 GitHub Releases（当前平台，需 `GH_TOKEN`） |
+| `npm run release:github` | 同 release，发布 Windows 安装包到 GitHub Releases（需 `GH_TOKEN`） |
 
 > `dist*` 系列带 `--publish never`，只生成本地产物，不会触发任何网络发布。
 > 跨平台限制：NSIS/AppImage/dmg 只能在对应系统上构建（或使用 CI）。
+>
+> **桌面版复用 Web 前端**：`dist*` / `release*` 均先执行 `next build` 产出
+> `.next/standalone`，再由 electron-builder 经 `extraResources` 打包进
+> `resources/web/server`（standalone 产物 + `.next/static` + `public`）。
+> 运行时主进程以纯 Node 模式（`ELECTRON_RUN_AS_NODE=1`）启动该 `server.js`
+> 作为本地 Web 服务，BrowserWindow 加载 `http://127.0.0.1:30123`。
 
 ---
 
@@ -53,7 +59,7 @@
 
 ## 4. 自动更新机制
 
-- 运行时只有同时满足 **打包版（isPackaged）** 且设置 `PRYSM_AUTO_UPDATE=1` 才启用自动更新；
+- 运行时只有**打包版（非开发模式）**且设置 `PRYSM_AUTO_UPDATE=1` 才启用自动更新；
   未开启时静默跳过，不影响本地安装版。
 - 更新源优先级：
   1. `PRYSM_UPDATE_URL` 环境变量（运行时覆盖，指向自建静态服务器）；

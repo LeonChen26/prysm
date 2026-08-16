@@ -19,5 +19,7 @@ dist-electron/
 release/
 release-build/
 .electron-cache/
+.electron-data/
+electron-data/
 plans.db
 *.db
