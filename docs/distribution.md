@@ -39,8 +39,11 @@
 > 跨平台限制：NSIS/AppImage/dmg 只能在对应系统上构建（或使用 CI）。
 >
 > **桌面版复用 Web 前端**：`dist*` / `release*` 均先执行 `next build` 产出
-> `.next/standalone`，再由 electron-builder 经 `extraResources` 打包进
+> `.next/standalone`，再由 `afterPack` 钩子（`electron/after-pack.cjs`）复制进
 > `resources/web/server`（standalone 产物 + `.next/static` + `public`）。
+> 说明：electron-builder 的 `extraResources` 会硬编码排除 node_modules，
+> 而 standalone 依赖 next 等运行时包，故改用 afterPack 自定义递归复制
+> （Next 16 standalone 的 `.next/node_modules` 为 junction，需 `realpathSync` 解析）。
 > 运行时主进程以纯 Node 模式（`ELECTRON_RUN_AS_NODE=1`）启动该 `server.js`
 > 作为本地 Web 服务，BrowserWindow 加载 `http://127.0.0.1:30123`。
 

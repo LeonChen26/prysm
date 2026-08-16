@@ -307,7 +307,7 @@ beforeToolCall
 | 6 | 多模态输入 + 知识库/RAG（`buildContext` 注入顺序：压缩→记忆→RAG） | 1b、3 | **✅ 完成** —— 图片/附件输入（落盘会话 workspace）+ MCP image 渲染 + `lib/rag.ts`（SQLite FTS5 / BM25，无外部嵌入模型） |
 | 7 | Plan mode + UI 分化（work/coding 视图） | 1a.1、3、4、5 | **✅ 完成** —— `lib/plan.ts`（propose/decide/cancel/超时/持久化）、`plan_propose` 工具、前端计划卡片与图片渲染、work/coding 视图 |
 | 7.5 | 通信层落地（核心层直接 emit `AgentEventBus`，移除路由 adapter，审批事件可序列化） | 7 | **✅ 完成** —— `createCore` 内 agent/approval/plan 直接注入共享 bus（带 sessionId 供按会话隔离），路由只订阅 bus 做 SSE 传输，事件均纯 JSON 可序列化 |
-| 8 | 桌面壳（Electron） | 1–7.5 | **✅ 完成** —— 复用 Web 前端：主进程拉起 Next.js 服务（开发 `next dev` / 打包 `standalone server.js` + `ELECTRON_RUN_AS_NODE`），BrowserWindow 加载 `http://127.0.0.1:30123`；数据经 `PRYSM_BASE_DIR=userData` 注入；esbuild 输出 CJS（`external: ["electron","electron-updater"]`）；`electron-builder` extraResources 打包 standalone；自动更新受 `PRYSM_AUTO_UPDATE` 门控 |
+| 8 | 桌面壳（Electron） | 1–7.5 | **✅ 完成** —— 复用 Web 前端：主进程拉起 Next.js 服务（开发 `next dev` / 打包 `standalone server.js` + `ELECTRON_RUN_AS_NODE`），BrowserWindow 加载 `http://127.0.0.1:30123`；数据经 `PRYSM_BASE_DIR=userData` 注入；esbuild 输出 CJS（`external: ["electron","electron-updater"]`）；standalone 经 `electron/after-pack.cjs` 复制到 `resources/web/server`（extraResources 会排除 node_modules，Next 16 junction 需 `realpathSync` 递归复制）；自动更新受 `PRYSM_AUTO_UPDATE` 门控 |
 
 ## 13. 决策汇总
 

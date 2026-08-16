@@ -155,7 +155,7 @@ DEEPSEEK_API_KEY=sk-xxx
 npm run dev
 ```
 
-访问 http://localhost:3000 ，在输入框下发任务即可与 Agent 交互。
+访问 http://localhost:30123 ，在输入框下发任务即可与 Agent 交互。
 
 ## 快速开始（桌面 Electron）
 
@@ -252,6 +252,7 @@ pm2 start .next/standalone/server.js --name prysm
 | `POST /api/memory-files` | 保存 / 重置偏好记忆（`{ action: "save"\|"reset" }`） |
 | `GET /api/permission` | 权限与审批配置（permission.json）及配置文件路径 |
 | `POST /api/permission` | 保存完整配置（`{ config }`）或切换模式（`{ activeMode }`） |
+| `GET /api/health` | 健康检查（Electron 壳启动后轮询，就绪后加载窗口） |
 | `GET /api/plans?sessionId=xxx&id=yyy` | 未决计划列表 / 单个计划（Plan mode） |
 | `POST /api/plans` | 计划决定（`{ id, action: "approve"\|"reject"\|"cancel" }`） |
 | `GET /api/rag?q=xxx&limit=20` | 知识库检索；无 `q` 时返回索引概览 |
@@ -280,6 +281,8 @@ pm2 start .next/standalone/server.js --name prysm
 | `RAG_SCAN_LIMIT` | `2000` | 单次扫描处理的最大文件数 |
 | `PRYSM_AUTO_UPDATE` | - | 桌面版自动更新开关（`1` 启用，仅打包版生效） |
 | `PRYSM_UPDATE_URL` | - | 桌面版自动更新源覆盖（自建服务器） |
+| `PRYSM_BASE_DIR` | `config.baseDir` | 桌面版由 Electron 注入 `userData`，作为 DB / 配置 / 技能的数据基准 |
+| `PRYSM_WEB_PORT` | `30123` | 桌面版本地 Web 服务端口（打包版 standalone 也适用） |
 | `PRYSM_LLM_JUDGE` | - | LLM-as-Judge 自动评分开关（`1` 启用，每次运行后主模型打分 0-10） |
 | `START_MCP_TIMEOUT_MS` | `15000` | MCP 连接超时（stdio 读 env / 远程读 headers） |
 | `RUN_MCP_TIMEOUT_MS` | `60000` | MCP 工具 / 资源 / prompt 调用超时 |
