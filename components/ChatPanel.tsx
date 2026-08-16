@@ -1818,9 +1818,7 @@ export function ChatPanel() {
           break; // 改写后落到普通消息发送流程
         }
         case "/help":
-          setInfo(
-            "可用命令：/new 新建会话 · /clear 清空当前会话 · /export 导出 Markdown · /theme 切换主题 · /skill <技能名> 运行技能 · /help 帮助",
-          );
+          setInfo("命令：/new 新建 · /clear 清空 · /export 导出 · /theme 主题 · /skill 技能 · /help 帮助");
           return;
         default:
           break; // 非命令则按普通消息发送

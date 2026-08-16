@@ -1338,6 +1338,11 @@ body.resizing {
   justify-content: flex-end;
   gap: 6px;
   margin-bottom: 12px;
+  /* 与消息气泡/输入框同宽居中，避免在宽屏下超出输入框 */
+  max-width: 780px;
+  margin: 0 auto 12px;
+  padding: 0 24px;
+  width: 100%;
 }
 
 .msg-toolbar-count {
@@ -1455,7 +1460,9 @@ body.resizing {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 10px;
+  width: fit-content;
+  max-width: 780px;
+  margin: 10px auto 0;
   padding: 10px 14px;
   border-radius: 12px;
   font-size: 12.5px;
