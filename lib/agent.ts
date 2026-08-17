@@ -39,6 +39,7 @@ const KEY_ENV: Record<string, string> = {
   deepseek: "DEEPSEEK_API_KEY",
   openai: "OPENAI_API_KEY",
   google: "GOOGLE_API_KEY",
+  "openai-compatible": "OPENAI_COMPAT_API_KEY",
 };
 
 /**

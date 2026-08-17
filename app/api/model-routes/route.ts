@@ -1,4 +1,9 @@
 import { listModelRoutes, setModelRoute } from "@/lib/model-router";
+import {
+  isOpenAICompatConfigured,
+  openaiCompatModels,
+  OPENAI_COMPAT_ID,
+} from "@/lib/model-router";
 import type { ModelRole } from "@/lib/config";
 import { envValue } from "@/lib/config";
 
@@ -6,7 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** 支持的 provider 与可选模型目录（与 model-router PROVIDER_FACTORIES 对齐） */
-const PROVIDERS = [
+const PROVIDER_DEFS = [
   {
     id: "anthropic",
     name: "Anthropic",
@@ -53,7 +58,19 @@ const PROVIDERS = [
       "gemini-3.5-flash",
     ],
   },
+  // OpenAI 兼容自定义端点（仅配置 OPENAI_COMPAT_BASE_URL/API_KEY 后展示）
+  {
+    id: OPENAI_COMPAT_ID,
+    name: "OpenAI Compatible",
+    apiKeyEnv: "OPENAI_COMPAT_API_KEY",
+    models: openaiCompatModels().map((m) => ({ id: m, name: m })),
+  },
 ] as const;
+
+/** 仅当 OpenAI 兼容端点已配置时展示该 provider（避免设置页出现"未配置"噪音项） */
+const PROVIDERS = PROVIDER_DEFS.filter(
+  (p) => p.id !== OPENAI_COMPAT_ID || isOpenAICompatConfigured(),
+);
 
 const ROLES: { id: ModelRole; name: string; hint: string }[] = [
   { id: "orchestrator", name: "主 Agent（编排）", hint: "负责主任务规划与执行" },
@@ -70,6 +87,7 @@ export async function GET() {
       id: p.id,
       name: p.name,
       apiKeyEnv: p.apiKeyEnv,
+      baseUrl: p.id === OPENAI_COMPAT_ID ? envValue("OPENAI_COMPAT_BASE_URL") : undefined,
       hasApiKey: Boolean(envValue(p.apiKeyEnv)),
       models: p.models.map((m) => ({ id: m, name: m })),
     }));

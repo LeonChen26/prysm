@@ -136,7 +136,7 @@ cp .env.example .env.local
 编辑 `.env.local`，至少填写所用提供商的 API Key 并设置模型：
 
 ```bash
-# 模型提供商: anthropic | deepseek | openai | google
+# 模型提供商: anthropic | deepseek | openai | google | openai-compatible（自定义 OpenAI 兼容端点）
 MODEL_PROVIDER=deepseek
 MODEL_ID=deepseek-v4-flash
 
@@ -145,6 +145,11 @@ MODEL_ID=deepseek-v4-flash
 DEEPSEEK_API_KEY=sk-xxx
 # OPENAI_API_KEY=sk-xxx
 # GOOGLE_API_KEY=sk-xxx
+
+# 使用 OpenAI 兼容端点（vLLM / Ollama / LM Studio / one-api 网关等）时配置：
+# OPENAI_COMPAT_BASE_URL=http://localhost:8000/v1
+# OPENAI_COMPAT_API_KEY=sk-xxx
+# OPENAI_COMPAT_MODELS=qwen2.5-72b,llama-3-70b   # 逗号分隔，未设置默认 ["gpt-4o-mini"]
 ```
 
 > `.env.local` 已被 gitignore，不会提交。全部可用变量见下文「环境变量」表。
@@ -263,12 +268,15 @@ pm2 start .next/standalone/server.js --name prysm
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `MODEL_PROVIDER` | `anthropic` | 模型提供商：`anthropic` / `deepseek` / `openai` / `google` |
+| `MODEL_PROVIDER` | `anthropic` | 模型提供商：`anthropic` / `deepseek` / `openai` / `google` / `openai-compatible` |
 | `MODEL_ID` | `claude-sonnet-4-5` | 默认模型 ID（deepseek: `deepseek-v4-flash` / `deepseek-v4-pro`） |
 | `ANTHROPIC_API_KEY` | - | Anthropic Key |
 | `DEEPSEEK_API_KEY` | - | DeepSeek Key |
 | `OPENAI_API_KEY` | - | OpenAI Key |
 | `GOOGLE_API_KEY` | - | Google Key |
+| `OPENAI_COMPAT_BASE_URL` | - | OpenAI 兼容端点完整地址（含 `/v1`，如 `http://localhost:8000/v1`）；配置后出现 `openai-compatible` provider |
+| `OPENAI_COMPAT_API_KEY` | - | OpenAI 兼容端点 Key |
+| `OPENAI_COMPAT_MODELS` | `gpt-4o-mini` | OpenAI 兼容端点可用模型 ID（逗号分隔） |
 | `MAX_CONTEXT_TOKENS` | `50000` | 累计 token 超过该值时摘要化最早对话 |
 | `KEEP_RECENT_MESSAGES` | `8` | 压缩时保留的最近消息条数 |
 | `MEMORY_RECALL_K` | `5` | 每次检索注入的历史 episode 条数 |

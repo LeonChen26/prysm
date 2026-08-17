@@ -11,8 +11,10 @@
  *
  * 本模块只依赖 config / prysm-db / pi-ai，不依赖 Next.js / pi-agent-core。
  */
-import type { MutableModels, Models, Provider } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai";
+import type { Model, MutableModels, Models, Provider } from "@earendil-works/pi-ai";
+import { createModels, createProvider, envApiKeyAuth } from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { envValue } from "./config";
 import { DatabaseSync } from "node:sqlite";
 import {
   basePath,
@@ -33,6 +35,71 @@ const PROVIDER_FACTORIES = {
 } as const;
 
 type ProviderId = keyof typeof PROVIDER_FACTORIES;
+
+// ------------------------------------------------------------ OpenAI 兼容端点
+
+/** OpenAI 兼容自定义端点的环境变量名 */
+export const OPENAI_COMPAT_ENV = {
+  baseUrl: "OPENAI_COMPAT_BASE_URL",
+  apiKey: "OPENAI_COMPAT_API_KEY",
+  models: "OPENAI_COMPAT_MODELS",
+} as const;
+
+/** OpenAI 兼容自定义端点的 provider id（区别于官方 openai） */
+export const OPENAI_COMPAT_ID = "openai-compatible";
+
+/** 未配置 OPENAI_COMPAT_MODELS 时使用的默认模型目录 */
+const OPENAI_COMPAT_DEFAULT_MODELS = ["gpt-4o-mini"];
+
+/** 是否已配置 OpenAI 兼容端点（baseUrl + apiKey 齐全） */
+export function isOpenAICompatConfigured(): boolean {
+  return Boolean(envValue(OPENAI_COMPAT_ENV.baseUrl) && envValue(OPENAI_COMPAT_ENV.apiKey));
+}
+
+/** 读取配置的模型 ID 列表（逗号分隔；未配置时返回默认目录） */
+export function openaiCompatModels(): string[] {
+  const list = (envValue(OPENAI_COMPAT_ENV.models) ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : [...OPENAI_COMPAT_DEFAULT_MODELS];
+}
+
+/** 构建 OpenAI 兼容 provider（读取 OPENAI_COMPAT_* 环境变量，未配置时抛错） */
+function buildOpenAICompatProvider(): Provider {
+  const baseUrl = envValue(OPENAI_COMPAT_ENV.baseUrl);
+  const apiKey = envValue(OPENAI_COMPAT_ENV.apiKey);
+  if (!baseUrl || !apiKey) {
+    throw new Error(
+      `未配置 OpenAI 兼容端点：请设置环境变量 ${OPENAI_COMPAT_ENV.baseUrl} 与 ${OPENAI_COMPAT_ENV.apiKey}`,
+    );
+  }
+  const models: Model<"openai-completions">[] = openaiCompatModels().map(
+    (id) =>
+      ({
+        id,
+        name: id,
+        api: "openai-completions",
+        provider: OPENAI_COMPAT_ID,
+        baseUrl,
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128_000,
+        maxTokens: 16_384,
+      }) as Model<"openai-completions">,
+  );
+  return createProvider({
+    id: OPENAI_COMPAT_ID,
+    name: "OpenAI Compatible",
+    baseUrl,
+    auth: {
+      apiKey: envApiKeyAuth("OpenAI-compatible API key", [OPENAI_COMPAT_ENV.apiKey]),
+    },
+    models,
+    api: openAICompletionsApi(),
+  });
+}
 
 /** 各角色默认路由（subagent 用小模型 deepseek，其余跟随主模型） */
 function defaultRoute(role: ModelRole): ModelRoute {
@@ -119,16 +186,26 @@ export async function getModels(
 ): Promise<MutableModels> {
   const cached = modelsCache.get(providerId);
   if (cached) return cached;
-  const factory = PROVIDER_FACTORIES[providerId as ProviderId];
-  if (!factory) {
-    throw new Error(
-      `不支持的模型提供商: "${providerId}"。可用: ${Object.keys(PROVIDER_FACTORIES).join(", ")}`,
-    );
-  }
-  const mod = (await factory()) as unknown as Record<string, () => unknown>;
-  const provider = mod[`${providerId}Provider`]() as Provider;
   const m = createModels();
-  m.setProvider(provider);
+  if (providerId === OPENAI_COMPAT_ID) {
+    // OpenAI 兼容自定义端点：由环境变量动态构建
+    if (!isOpenAICompatConfigured()) {
+      throw new Error(
+        `未配置 OpenAI 兼容端点：缺少 ${OPENAI_COMPAT_ENV.baseUrl} 或 ${OPENAI_COMPAT_ENV.apiKey} 环境变量`,
+      );
+    }
+    m.setProvider(buildOpenAICompatProvider());
+  } else {
+    const factory = PROVIDER_FACTORIES[providerId as ProviderId];
+    if (!factory) {
+      throw new Error(
+        `不支持的模型提供商: "${providerId}"。可用: ${Object.keys(PROVIDER_FACTORIES).join(", ")}`,
+      );
+    }
+    const mod = (await factory()) as unknown as Record<string, () => unknown>;
+    const provider = mod[`${providerId}Provider`]() as Provider;
+    m.setProvider(provider);
+  }
   modelsCache.set(providerId, m);
   return m;
 }

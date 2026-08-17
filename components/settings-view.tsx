@@ -21,6 +21,7 @@ interface ProviderInfo {
   id: string;
   name: string;
   apiKeyEnv: string;
+  baseUrl?: string;
   hasApiKey: boolean;
   models: { id: string; name: string }[];
 }
@@ -799,12 +800,14 @@ export function SettingsPanel({
             <div className="settings-section">
               <div className="settings-label">模型 / Provider</div>
               <div className="settings-note">
-                为各角色指定模型提供商与模型；Provider 需在环境变量配置 API Key。
+                为各角色指定模型提供商与模型；Provider 需在环境变量配置 API Key。OpenAI Compatible 需配置{" "}
+                OPENAI_COMPAT_BASE_URL / OPENAI_COMPAT_API_KEY。
               </div>
               <div className="settings-legend">
                 {providers.map((p) => (
                   <span key={p.id} className={`settings-dot ${p.hasApiKey ? "settings-dot-ok" : "settings-dot-err"}`}>
                     {p.name} {p.hasApiKey ? "已配置" : `缺 ${p.apiKeyEnv}`}
+                    {p.baseUrl ? `（${p.baseUrl}）` : ""}
                   </span>
                 ))}
               </div>
