@@ -147,6 +147,29 @@ async function main() {
     "r1:risk=high:reason=命中受保护路径（环境变量文件）|resolved:r1:risk=high",
   );
 
+  console.log("\n== 审批策略 never（PRYSM_APPROVAL_POLICY=never） ==");
+  process.env.PRYSM_APPROVAL_POLICY = "never";
+  const neverEvents: string[] = [];
+  const unsubNever = subscribeApprovalLifecycle((e) => {
+    if (e.type === "notice") neverEvents.push(`notice:${e.toolName}`);
+    if (e.type === "required") neverEvents.push(`required:${e.state.id}`);
+  });
+  const pNever = requestApproval({
+    id: "n1",
+    toolName: "run_bash",
+    args: { command: "rm -rf /" },
+  });
+  expectEq("never 模式立即返回 false（确定性拒绝）", await pNever, false);
+  expectEq(
+    "never 不产生 required（无审批卡片）",
+    neverEvents.some((x) => x.startsWith("required")),
+    false,
+  );
+  expectEq("never 推 notice 事件（denied_auto 通知）", neverEvents.join(","), "notice:run_bash");
+  expectEq("never 不残留 pending", listPendingApprovals().some((x) => x.id === "n1"), false);
+  unsubNever();
+  delete process.env.PRYSM_APPROVAL_POLICY;
+
   console.log("\n✓ 工具审批流验证通过");
 }
 

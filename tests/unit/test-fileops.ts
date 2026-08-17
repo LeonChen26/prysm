@@ -183,13 +183,21 @@ async function main() {
   if (!f3.content[0].text.includes("a.txt")) {
     fail(`find 限定目录应命中 a.txt:\n${f3.content[0].text}`);
   }
+  // 读放开（Phase 1）：find 可搜索工作区外目录（../ 越界不再拒绝），用不存在的模式保证确定性
   let threw2 = false;
+  let fOutside: { content: { type: string; text: string }[] } | undefined;
   try {
-    await findTool.execute("t7", { pattern: "*.txt", path: "../" });
+    fOutside = (await findTool.execute("t7", {
+      pattern: "*.zzz-no-such",
+      path: "../",
+    })) as { content: { type: string; text: string }[] };
   } catch {
     threw2 = true;
   }
-  if (!threw2) fail("find 越界子目录应抛错拒绝");
+  if (threw2) fail("find 越界子目录不再抛错（读放开）");
+  if (!fOutside || !fOutside.content[0].text.includes("未找到")) {
+    fail(`find 越界子目录应正常返回未找到结果（读放开）:\n${fOutside?.content[0].text}`);
+  }
 
   console.log("\n✓ 文件工具增强验证通过（含 edit_file diff、find 查找与越界拦截）");
   await fs.rm(testDir, { recursive: true, force: true });

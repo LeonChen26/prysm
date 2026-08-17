@@ -1923,6 +1923,8 @@ export function ChatPanel() {
       if (!text) return;
       const content = plain ? mdToPlainText(text) : text;
       if (!content) return;
+      // React 合成事件跨异步边界后 currentTarget 会置空，须在同步阶段先捕获按钮引用
+      const btn = e.currentTarget;
       let ok = false;
       try {
         await navigator.clipboard.writeText(content);
@@ -1943,7 +1945,6 @@ export function ChatPanel() {
         }
       }
       if (!ok) return;
-      const btn = e.currentTarget;
       const original = btn.textContent ?? "复制";
       btn.textContent = "已复制";
       btn.classList.add("msg-action-copied");

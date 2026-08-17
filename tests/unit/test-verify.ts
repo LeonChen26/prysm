@@ -59,15 +59,10 @@ async function main() {
   if (d4.exists !== false) fail(`不存在文件应 exists=false: ${JSON.stringify(d4)}`);
   console.log(`  ✓ exists=${d4.exists}`);
 
-  console.log("== 越界拦截 ==");
-  let escaped = false;
-  try {
-    await call("v5", { path: "../escape-verify.txt" });
-  } catch {
-    escaped = true;
-  }
-  if (!escaped) fail("越界路径应抛错");
-  console.log("  ✓ 越界被拦截");
+  console.log("== 越界读（读放开：不抛错，仅返回不存在）==");
+  const d5 = await call("v5", { path: "../escape-verify.txt" });
+  if (d5.exists !== false) fail(`越界读应 exists=false: ${JSON.stringify(d5)}`);
+  console.log("  ✓ 越界读返回 exists=false");
 
   console.log("\n✓ verify_file 验证通过");
   await fs.rm(testDir, { recursive: true, force: true });

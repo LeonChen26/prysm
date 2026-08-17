@@ -13,7 +13,7 @@
 
 import { logApproval } from "./audit";
 import type { RiskLevel } from "./risk";
-import { getFileApprovalTimeoutMs } from "./permission";
+import { getApprovalPolicy, getFileApprovalTimeoutMs } from "./permission";
 
 export interface ApprovalRequest {
   id: string;
@@ -91,6 +91,24 @@ export function requestApproval(
   req: ApprovalRequest,
   timeoutMs?: number,
 ): Promise<boolean> {
+  // 审批策略门（Phase 2）：never 模式确定性拒绝 —— 不创建请求、不弹卡片，
+  // 立即以失败 resolve，审计 outcome 标注 denied(auto)，并推 notice 事件。
+  if (getApprovalPolicy() === "never") {
+    const reason = "审批策略为 never（PRYSM_APPROVAL_POLICY=never / approvalPolicy=never），操作被确定性拒绝";
+    logApproval(req.toolName, req.args, "denied_auto", {
+      sessionId: req.sessionId,
+      risk: req.risk,
+      reason,
+    });
+    notifyApprovalNotice(req.id, req.toolName, req.args, reason, req.sessionId);
+    return Promise.resolve(false);
+  }
+  // 审计配对（Phase 2）：发起即记录 asked，与后续 decided（approved/denied/timeout）成对
+  logApproval(req.toolName, req.args, "asked", {
+    sessionId: req.sessionId,
+    risk: req.risk,
+    reason: req.riskReason,
+  });
   return new Promise((resolve) => {
     const effectiveTimeout = timeoutMs ?? getFileApprovalTimeoutMs();
     const createdAt = Date.now();

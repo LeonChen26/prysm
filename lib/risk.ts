@@ -100,6 +100,19 @@ function maxLevel(a: RiskLevel, b: RiskLevel): RiskLevel {
   return RISK_ORDER[b] > RISK_ORDER[a] ? b : a;
 }
 
+/**
+ * 受保护路径判定（读放开兜底：只读工具命中则路径层直接拒绝）。
+ * 与 assessRisk 的写/删风险升级共用同一套规则，避免两处维护。
+ * @param p 绝对路径（已 realpath 规范化）
+ */
+export function isProtectedPath(p: string): { hit: boolean; label?: string } {
+  const norm = p.replace(/\\/g, "/");
+  for (const rule of PROTECTED_PATH_RES) {
+    if (rule.re.test(norm)) return { hit: true, label: rule.label };
+  }
+  return { hit: false };
+}
+
 /** 从工具参数中提取相对路径（与 policy.ts 一致的规则） */
 function extractRelPath(args: unknown): string | null {
   if (!args || typeof args !== "object") return null;

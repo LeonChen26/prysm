@@ -16,7 +16,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { basePath } from "./config";
+import { basePath, envValue } from "./config";
 
 export type PermissionMode = "manual" | "auto" | "full" | "custom";
 export type Reviewer = "user" | "llm" | "always_deny";
@@ -66,6 +66,8 @@ export interface PermissionConfig {
   resourceAuthorization: ResourceAuthorization;
   /** 审批超时（毫秒）；缺省回退 120000 */
   approvalTimeoutMs: number;
+  /** 审批策略：ask=正常弹审批；never=永不提示、确定性拒绝（CI/无人值守） */
+  approvalPolicy: "ask" | "never";
 }
 
 /* ------------------------- 默认值 / 预设 ------------------------- */
@@ -136,6 +138,7 @@ function defaultConfig(): PermissionConfig {
       network: { allow: [], deny: [] },
     },
     approvalTimeoutMs: 120000,
+    approvalPolicy: "ask",
   };
 }
 
@@ -160,6 +163,10 @@ function normalizeConfig(raw: unknown): PermissionConfig {
     out.approvalTimeoutMs = timeout;
   } else if (typeof timeout === "string" && /^\d+$/.test(timeout.trim())) {
     out.approvalTimeoutMs = Number(timeout.trim());
+  }
+  const policy = r.approvalPolicy;
+  if (policy === "ask" || policy === "never") {
+    out.approvalPolicy = policy;
   }
   const profiles = r.customProfiles as Record<string, unknown> | undefined;
   if (profiles && typeof profiles === "object" && Object.keys(profiles).length > 0) {
@@ -333,6 +340,16 @@ export function getResourceAuthorization(): ResourceAuthorization {
 /** 审批超时（毫秒），缺省 120000 */
 export function getFileApprovalTimeoutMs(): number {
   return getPermission().approvalTimeoutMs;
+}
+
+/**
+ * 审批策略（ask/never）：环境变量 PRYSM_APPROVAL_POLICY 优先，其次 permission.json 的 approvalPolicy。
+ * never = 永不提示、确定性拒绝（CI / 无人值守），避免审批挂起。
+ */
+export function getApprovalPolicy(): "ask" | "never" {
+  const env = envValue("PRYSM_APPROVAL_POLICY");
+  if (env === "never" || env === "ask") return env;
+  return getPermission().approvalPolicy;
 }
 
 /* ------------------------- 规则匹配 ------------------------- */

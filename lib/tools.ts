@@ -6,7 +6,8 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
 import { fetchUrlAsText, webSearch } from "./web";
-import { getAllowedRoots, getAgentWorkdir, resolveInWorkdirOrThrow as resolveInWorkdirOrThrowBase } from "./paths";
+import { getAllowedRoots, getAgentWorkdir, resolveInWorkspace } from "./paths";
+import { resolveExecutionPolicy, type FileOp } from "./execution-policy";
 import { TOOL_META } from "./tool-meta";
 import type { SubagentSpec } from "./subagent";
 import { proposePlan } from "./plan";
@@ -93,9 +94,23 @@ export function getEffectiveWorkdirForTest(): string {
   return effectiveWorkdir();
 }
 
-/** 解析工作区路径：以会话绑定目录为根（未绑定回退全局默认工作区） */
-function resolveInWorkdirOrThrow(relative: string, root?: string): string {
-  return resolveInWorkdirOrThrowBase(relative, root ?? effectiveWorkdir());
+/**
+ * 解析工具路径（权限审批优化 Phase 0/1 统一入口）：
+ * 按操作语义（read/write）经执行策略（root + fullAccess）统一裁决。
+ * - read：任意本地路径放行（受保护路径拒绝）
+ * - write：工作区内已授权才可写
+ */
+function resolveToolPath(relative: string, op: FileOp, root?: string): string {
+  const policy = resolveExecutionPolicy(root ?? effectiveWorkdir());
+  const r = resolveInWorkspace(relative, policy, op);
+  if (r.ok) return r.path;
+  if (r.reason === "unauthorized") {
+    throw new Error(`目录未授权: "${relative}" 位于未授权的工作区根「${r.root}」，需先授权该目录`);
+  }
+  if (r.reason === "sensitive") {
+    throw new Error(`路径受保护: "${relative}" 命中受保护路径（${r.label ?? "敏感文件"}），只读访问被拒绝`);
+  }
+  throw new Error(`路径越界: "${relative}" 不在可访问的工作区根内`);
 }
 
 interface FileHit {
@@ -149,7 +164,7 @@ async function findInWorkdir(
 ): Promise<{ path: string; size: number }[]> {
   const re = globPathToRegex(pattern);
   if (!re) throw new Error(`无效的 glob 模式: ${pattern}`);
-  const root = resolveInWorkdirOrThrow(subPath ?? "");
+  const root = resolveToolPath(subPath ?? "", "read");
   const stat = await fs.stat(root);
   if (!stat.isDirectory()) throw new Error(`不是目录: ${subPath ?? ""}`);
   const hits: { path: string; size: number }[] = [];
@@ -409,7 +424,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const dir = resolveInWorkdirOrThrow(params.dir ?? "");
+      const dir = resolveToolPath(params.dir ?? "", "read");
       const entries = await fs.readdir(dir, { withFileTypes: true });
       const lines = entries.map((e) => (e.isDirectory() ? `[dir] ${e.name}` : e.name));
       return {
@@ -427,7 +442,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdirOrThrow(params.path);
+      const file = resolveToolPath(params.path, "read");
       const stat = await fs.stat(file);
       if (stat.size > 100 * 1024) {
         throw new Error(`文件过大 (${stat.size} 字节)，仅支持读取 100KB 以内`);
@@ -449,7 +464,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdirOrThrow(params.path);
+      const file = resolveToolPath(params.path, "write");
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, params.content, "utf-8");
       return {
@@ -474,7 +489,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdirOrThrow(params.path);
+      const file = resolveToolPath(params.path, "write");
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.appendFile(file, params.content, "utf-8");
       return {
@@ -504,7 +519,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdirOrThrow(params.path);
+      const file = resolveToolPath(params.path, "write");
       if (params.old_string === undefined) {
         throw new Error("edit_file 缺少必需参数 old_string");
       }
@@ -569,7 +584,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const dir = resolveInWorkdirOrThrow(params.path);
+      const dir = resolveToolPath(params.path, "write");
       await fs.mkdir(dir, { recursive: true });
       return {
         content: [{ type: "text", text: `目录已就绪: ${params.path}` }],
@@ -587,8 +602,8 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const src = resolveInWorkdirOrThrow(params.from);
-      const dst = resolveInWorkdirOrThrow(params.to);
+      const src = resolveToolPath(params.from, "write");
+      const dst = resolveToolPath(params.to, "write");
       await fs.mkdir(path.dirname(dst), { recursive: true });
       await fs.rename(src, dst);
       return {
@@ -609,8 +624,8 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const src = resolveInWorkdirOrThrow(params.from);
-      const dst = resolveInWorkdirOrThrow(params.to);
+      const src = resolveToolPath(params.from, "write");
+      const dst = resolveToolPath(params.to, "write");
       await fs.mkdir(path.dirname(dst), { recursive: true });
       await fs.copyFile(src, dst);
       return {
@@ -630,7 +645,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdirOrThrow(params.path);
+      const file = resolveToolPath(params.path, "write");
       await fs.unlink(file);
       return {
         content: [{ type: "text", text: `已删除文件: ${params.path}` }],
@@ -651,7 +666,7 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const file = resolveInWorkdirOrThrow(params.path);
+      const file = resolveToolPath(params.path, "read");
       try {
         const stat = await fs.stat(file);
         if (!stat.isFile()) {

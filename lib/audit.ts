@@ -15,7 +15,9 @@ export type AuditAction =
   | "denied_auto"
   | "auto"
   /** LLM Guardian 拒绝后回退用户确认（action=ask 记录在审计留痕） */
-  | "ask";
+  | "ask"
+  /** 审批请求发起（与 approved/denied/timeout 等 decided 记录配对，形成 asked→decided 审计对） */
+  | "asked";
 
 export interface AuditRecord {
   id: number;

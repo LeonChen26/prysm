@@ -10,6 +10,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { basePath } from "./config";
 import { listWorkspaces, isRootAuthorized, type WorkspaceRecord } from "./workspace";
+import { isProtectedPath } from "./risk";
+import type { ExecutionPolicy, FileOp } from "./execution-policy";
 
 /** 权威：当前默认工作区根（config.baseDir/agent-workdir） */
 export function getAgentWorkdir(): string {
@@ -28,36 +30,59 @@ export const AGENT_WORKDIR = getAgentWorkdir();
 export const ALLOWED_ROOTS = getAllowedRoots();
 
 /**
- * 解析结果（Phase 2 结构化）
+ * 解析结果（Phase 2 结构化；权限审批优化 Phase 1 扩展 sensitive）
  * - ok:true    路径可访问，path 为解析后的绝对路径
  * - unauthorized: 落在某工作区根内，但该工作区未授权（默认拒绝），可走授权流
  * - outside:   落在所有工作区根之外（永不授权，直接拒绝）
+ * - sensitive: 命中受保护路径（.env/.ssh/.aws/db 等），只读访问被拒绝
  */
 export type ResolveResult =
   | { ok: true; path: string }
   | {
       ok: false;
-      reason: "outside" | "unauthorized";
+      reason: "outside" | "unauthorized" | "sensitive";
       /** unauthorized 时为所属工作区根；outside 时为 undefined */
       root?: string;
       workspaceId?: string;
+      /** sensitive 时命中的受保护路径类别（如"环境变量文件"） */
+      label?: string;
     };
 
 /**
- * 解析相对路径并校验可访问性（Phase 2 起返回结构化结果，不再抛错）。
- * 判定规则：
- * 1. 落在某个工作区根内且该工作区已授权（默认工作区恒授权）→ ok
- * 2. 落在某工作区根内但未授权 → unauthorized（需授权）
- * 3. 落在所有工作区根之外 → outside（永不授权）
- * 安全兜底：对已存在的路径组件解析 realpath，防止通过工作区内的符号链接
- *   跳出沙箱（例如 `workdir/evil-symlink -> /etc`，字符串层面在工作区内，
- *   但 realpath 已跳至外部）。
- * @param relative 相对路径（可用 ../ 越界，但最终必须落在某个工作区根内）
- * @param root 基准根（缺省默认工作区）；可用于指定浏览/操作某个具体工作区
+ * 核心路径判定（权限审批优化 Phase 0/1）
+ * 按执行策略与操作语义（read/write）统一裁决：
+ * - fullAccess → 直接放行（跳过一切工作区/敏感判定）
+ * - read（读放开）：任意本地路径放行（realpath 规范化），命中受保护路径拒绝
+ * - write：仅已授权工作区内可写（原 resolveInWorkdir 语义）
+ * @param relative 相对路径（可用 ../ 越界，read 时允许任意本地路径；write 时最终必须落在某工作区根内）
+ * @param policy 执行策略（root + fullAccess）
+ * @param op 操作语义
  */
-export function resolveInWorkdir(relative: string, root?: string): ResolveResult {
-  const base = root ? path.resolve(root) : getAgentWorkdir();
+export function resolveInWorkspace(
+  relative: string,
+  policy: ExecutionPolicy,
+  op: FileOp,
+): ResolveResult {
+  const base = path.resolve(policy.root);
   const resolved = path.resolve(base, relative);
+
+  // 完全访问模式：跳过一切路径与敏感文件拦截
+  if (policy.fullAccess) return { ok: true, path: resolved };
+
+  // 只读：任意本地路径放行（realpath 规范化，防符号链接指向敏感文件/逃逸）
+  if (op === "read") {
+    const realResolved = resolveExistingRealpath(resolved);
+    if (realResolved === null) {
+      return { ok: false, reason: "outside" };
+    }
+    const hit = isProtectedPath(realResolved);
+    if (hit.hit) {
+      return { ok: false, reason: "sensitive", label: hit.label };
+    }
+    return { ok: true, path: realResolved };
+  }
+
+  // ---- 写语义（原 resolveInWorkdir 逻辑） ----
   const workspaces = listWorkspaces();
 
   // 第 1 步：字符串层面匹配工作区根（处理 nonexistent 路径，避免 realpath 抛 ENOENT 的必要前置）
@@ -106,6 +131,52 @@ export function resolveInWorkdir(relative: string, root?: string): ResolveResult
   }
   // 当存在符号链接时，返回 realpath，确保后续 fs.* 调用实际操作的是已经过校验的路径
   return { ok: true, path: realResolved };
+}
+
+/**
+ * 解析相对路径并校验可访问性（写语义，兼容历史调用方）。
+ * 判定规则：
+ * 1. 落在某个工作区根内且该工作区已授权（默认工作区恒授权）→ ok
+ * 2. 落在某工作区根内但未授权 → unauthorized（需授权）
+ * 3. 落在所有工作区根之外 → outside（永不授权）
+ * 安全兜底：对已存在的路径组件解析 realpath，防止通过工作区内的符号链接
+ *   跳出沙箱（例如 `workdir/evil-symlink -> /etc`，字符串层面在工作区内，
+ *   但 realpath 已跳至外部）。
+ * @param relative 相对路径（可用 ../ 越界，但最终必须落在某个工作区根内）
+ * @param root 基准根（缺省默认工作区）；可用于指定浏览/操作某个具体工作区
+ */
+export function resolveInWorkdir(relative: string, root?: string): ResolveResult {
+  return resolveInWorkspace(
+    relative,
+    { root: root ? path.resolve(root) : getAgentWorkdir(), fullAccess: false },
+    "write",
+  );
+}
+
+/** 只读解析并校验（读放开语义：任意本地路径，受保护路径拒绝） */
+export function resolveReadInWorkdirOrThrow(relative: string, root?: string): string {
+  return resolveInWorkspaceOrThrow(relative, "read", root);
+}
+
+/** 写解析并校验（工作区内已授权才可写） */
+export function resolveWriteInWorkdirOrThrow(relative: string, root?: string): string {
+  return resolveInWorkspaceOrThrow(relative, "write", root);
+}
+
+function resolveInWorkspaceOrThrow(relative: string, op: FileOp, root?: string): string {
+  const r = resolveInWorkspace(
+    relative,
+    { root: root ? path.resolve(root) : getAgentWorkdir(), fullAccess: false },
+    op,
+  );
+  if (r.ok) return r.path;
+  if (r.reason === "unauthorized") {
+    throw new Error(`目录未授权: "${relative}" 位于未授权的工作区根「${r.root}」，需先授权该目录`);
+  }
+  if (r.reason === "sensitive") {
+    throw new Error(`路径受保护: "${relative}" 命中受保护路径（${r.label ?? "敏感文件"}），只读访问被拒绝`);
+  }
+  throw new Error(`路径越界: "${relative}" 不在可访问的工作区根内`);
 }
 
 /**

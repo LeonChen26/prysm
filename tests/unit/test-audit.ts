@@ -65,10 +65,12 @@ async function main() {
   const acts = list.map((a) => `${a.toolName}:${a.action}`);
   console.log("历史:", acts.join(", "));
 
-  if (total < 4) fail(`应有至少 4 条历史，实际 ${total}`);
+  // 审批策略门（Phase 2）：asked 审计配对 —— 每次 requestApproval 先写 asked 再写 decided
+  if (total < 8) fail(`应有至少 8 条历史（4 组 asked→decided 配对），实际 ${total}`);
   if (!acts.includes("write_file:approved")) fail("缺少 approved 记录");
   if (!acts.includes("delete_file:denied")) fail("缺少 denied 记录");
   if (!acts.includes("run_bash:timeout")) fail("缺少 timeout 记录");
+  if (!acts.includes("write_file:asked")) fail("缺少 asked 记录（审批发起审计配对）");
   // 会话关联与风险等级被记录（可回溯）
   const w4 = list.find((a) => a.id > 0 && a.sessionId === "s1");
   if (!w4) fail("应记录 sessionId");
@@ -108,11 +110,12 @@ async function main() {
   const onlyWrite = listApprovals(10, { tool: "write_file" });
   const allTools = listApprovals(10);
   console.log(`  全量 ${allTools.length} 条，其中 write_file ${onlyWrite.length} 条`);
-  if (onlyWrite.length !== 2) fail(`按 tool 筛选 write_file 应得 2 条，实际 ${onlyWrite.length}`);
+  // Phase 2：每次 requestApproval 产生 asked + decided 两条，write_file 两次调用 → 4 条
+  if (onlyWrite.length !== 4) fail(`按 tool 筛选 write_file 应得 4 条（2 组 asked→decided），实际 ${onlyWrite.length}`);
   if (!onlyWrite.every((r) => r.toolName === "write_file")) fail("write_file 筛选结果不纯");
-  expectEq("按 tool 计数 countApprovals", countApprovals({ tool: "write_file" }), 2);
-  expectEq("按 tool=run_bash 计数", countApprovals({ tool: "run_bash" }), 1);
-  expectEq("全量计数（无筛选）", countApprovals(), 3);
+  expectEq("按 tool 计数 countApprovals", countApprovals({ tool: "write_file" }), 4);
+  expectEq("按 tool=run_bash 计数", countApprovals({ tool: "run_bash" }), 2);
+  expectEq("全量计数（无筛选）", countApprovals(), 6);
 
   console.log("\n== 审计筛选：按 action 动作 ==");
   const deniedOnly = listApprovals(10, { action: "denied" });
@@ -128,15 +131,16 @@ async function main() {
 
   console.log("\n== 审计分页：limit 与 offset ==");
   const allAsc = listApprovals(10).reverse(); // 老在前
-  // 写入顺序：fA1(write, approved) → fA2(write, denied) → fA3(run, approved)
-  // listApprovals 新在前：顺序 fA3, fA2, fA1
+  // 写入顺序：fA1(asked→approved) → fA2(asked→denied) → fA3(asked→approved)
+  // listApprovals 新在前：fA3 approved, fA3 asked, fA2 denied, fA2 asked, fA1 approved, fA1 asked
   const page1 = listApprovals(2, {}); // 前 2 条（最新两条）
   const page2 = listApprovals(2, { offset: 2 }); // 跳过 2 取后面
   expectEq("page1 size=limit=2", page1.length, 2);
-  expectEq("page1[0] 最新 = fA3", page1[0].toolName + ":" + page1[0].action, "run_bash:approved");
-  expectEq("page1[1] = fA2", page1[1].toolName + ":" + page1[1].action, "write_file:denied");
-  expectEq("page2 至少 1 条（offset=2 后剩 fA1）", page2.length >= 1, true);
-  expectEq("page2[0] = fA1（最老）", page2[0].toolName + ":" + page2[0].action, "write_file:approved");
+  expectEq("page1[0] 最新 = fA3 approved", page1[0].toolName + ":" + page1[0].action, "run_bash:approved");
+  expectEq("page1[1] = fA3 asked（配对的发起记录）", page1[1].toolName + ":" + page1[1].action, "run_bash:asked");
+  expectEq("page2 size=2（offset=2 后剩 4 条取 2）", page2.length, 2);
+  expectEq("page2[0] = fA2 denied", page2[0].toolName + ":" + page2[0].action, "write_file:denied");
+  expectEq("page2[1] = fA2 asked", page2[1].toolName + ":" + page2[1].action, "write_file:asked");
   expectEq("offset 超出返回空数组", listApprovals(10, { offset: 999 }).length, 0);
 
   const removed = clearApprovals();
