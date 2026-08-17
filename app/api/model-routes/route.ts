@@ -63,7 +63,7 @@ const PROVIDER_DEFS = [
     id: OPENAI_COMPAT_ID,
     name: "OpenAI Compatible",
     apiKeyEnv: "OPENAI_COMPAT_API_KEY",
-    models: openaiCompatModels().map((m) => ({ id: m, name: m })),
+    models: openaiCompatModels(),
   },
 ] as const;
 
