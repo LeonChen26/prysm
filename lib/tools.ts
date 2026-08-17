@@ -106,7 +106,7 @@ interface FileHit {
 }
 
 /** 文件名通配（支持 * 和 ?）转正则 */
-function globToRegex(pattern: string): RegExp | null {
+export function globToRegex(pattern: string): RegExp | null {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*/g, ".*")
@@ -125,7 +125,7 @@ function globToRegex(pattern: string): RegExp | null {
  * - `?`  匹配单个字符（不含 /）
  * pattern 不含 "/" 时视为匹配任意层级下的文件名（自动补全局前缀）。
  */
-function globPathToRegex(pattern: string): RegExp | null {
+export function globPathToRegex(pattern: string): RegExp | null {
   let full = pattern;
   if (!full.includes("/")) full = `**/${full}`;
   const escaped = full
@@ -252,7 +252,7 @@ async function searchInWorkdir(
 }
 
 /** 统计字符串中的换行数（用于定位 old_string / new_string 的行号） */
-function countNewlines(s: string): number {
+export function countNewlines(s: string): number {
   let n = 0;
   for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 10) n++;
   return n;
@@ -269,7 +269,7 @@ function countNewlines(s: string): number {
  * @param oldEndLine   old_string 尾行（0 基）
  * @param newEndLine   new_string 尾行（0 基，相对 newLines）
  */
-function buildEditDiff(
+export function buildEditDiff(
   relPath: string,
   oldLines: string[],
   newLines: string[],

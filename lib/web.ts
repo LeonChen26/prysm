@@ -43,7 +43,7 @@ async function fetchText(url: string, timeoutMs: number): Promise<string> {
  * SSRF 防护：判断 IP 是否为内网/环回/链路本地/保留地址。
  * 联网抓取工具只能访问公网地址，防止借 fetch 探测内网与云元数据服务。
  */
-function isBlockedIp(ip: string): boolean {
+export function isBlockedIp(ip: string): boolean {
   const lower = ip.toLowerCase();
   // IPv4-mapped IPv6（::ffff:1.2.3.4）取内嵌 IPv4 判断
   const v4mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
@@ -115,7 +115,7 @@ async function safeFetch(
 }
 
 /** 解码常用 HTML 实体 */
-function decodeEntities(s: string): string {
+export function decodeEntities(s: string): string {
   return s
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -133,12 +133,12 @@ function decodeEntities(s: string): string {
 }
 
 /** 剥离 HTML 标签（保留文本内容） */
-function stripTags(s: string): string {
+export function stripTags(s: string): string {
   return s.replace(/<[^>]+>/g, "");
 }
 
 /** HTML → 纯文本：按块级标签换行，保留标题/列表结构 */
-function htmlToText(html: string): string {
+export function htmlToText(html: string): string {
   let s = html.replace(/<(script|style|noscript|svg|iframe|head)[\s\S]*?<\/\1>/gi, " ");
   s = s.replace(/<\/(p|div|h[1-6]|li|pre|tr|blockquote|section|article|td|th)>/gi, "\n");
   s = s.replace(/<br[^>]*>/gi, "\n");
@@ -151,7 +151,7 @@ function htmlToText(html: string): string {
 }
 
 /** 解析 Bing 结果页（li.b_algo 块：h2>a 标题链接 + p 摘要） */
-function parseBing(html: string, limit: number): SearchResult[] {
+export function parseBing(html: string, limit: number): SearchResult[] {
   const results: SearchResult[] = [];
   const blocks = html.split(/<li class="b_algo/i).slice(1);
   for (const block of blocks) {
@@ -187,7 +187,7 @@ function parseBing(html: string, limit: number): SearchResult[] {
 }
 
 /** 解析 DuckDuckGo html 端点（result__a 标题链接 + result__snippet 摘要） */
-function parseDuckDuckGo(html: string, limit: number): SearchResult[] {
+export function parseDuckDuckGo(html: string, limit: number): SearchResult[] {
   const results: SearchResult[] = [];
   const re =
     /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;

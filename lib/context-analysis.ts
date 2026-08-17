@@ -70,7 +70,7 @@ const LABELS: Record<ContextCategoryKey, string> = {
 const MAX_CHARS_PER_EPISODE = 200;
 
 /** 字符级 token 估算：CJK 按 1 字 1 token，其余按 4 字符 1 token */
-function estimateTokens(text: string): number {
+export function estimateTokens(text: string): number {
   if (!text) return 0;
   const cjk = (
     text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) ?? []
@@ -80,14 +80,14 @@ function estimateTokens(text: string): number {
 }
 
 /** 提取 assistant 消息的 usage（非 assistant 或无 usage 返回 null） */
-function usageOf(m: AgentMessage): Usage | null {
+export function usageOf(m: AgentMessage): Usage | null {
   if (m.role !== "assistant") return null;
   const u = (m as { usage?: Usage }).usage;
   return u && typeof u.input === "number" ? u : null;
 }
 
 /** 累加 usage（真实值求和） */
-function addUsage(acc: Usage | null, u: Usage): Usage {
+export function addUsage(acc: Usage | null, u: Usage): Usage {
   if (!acc) return { ...u, cost: { ...u.cost } };
   return {
     input: acc.input + u.input,
