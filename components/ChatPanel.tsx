@@ -577,6 +577,10 @@ export function ChatPanel() {
   const [modelOpen, setModelOpen] = useState(false);
   /** 输入框审批模式下拉是否展开 */
   const [approvalOpen, setApprovalOpen] = useState(false);
+  /** 会话级审批策略下拉是否展开 */
+  const [policyOpen, setPolicyOpen] = useState(false);
+  /** 当前会话的审批策略覆盖（undefined = 跟随全局） */
+  const sessionPolicy = sessions.find((s) => s.id === sessionId)?.approvalPolicy;
   /** 审批模式：手动 / 自动（LLM Guardian 决策，拒绝回退用户）/ 完全访问（不审批）/ 自定义（细粒度配置）。
    *  持久化到 localStorage（服务端写入 permission.json）。初始固定 manual，避免 SSR 水合不一致。 */
   const [approvalMode, setApprovalMode] = useState<"manual" | "auto" | "full" | "custom">("manual");
@@ -2196,6 +2200,27 @@ export function ChatPanel() {
     });
   }, [approvalMode, plans, decidePlan]);
 
+  /** 会话级审批策略：写入 /api/sessions/:id/approval-policy 并刷新会话列表 */
+  const applySessionApprovalPolicy = useCallback(
+    async (policy: "ask" | "never" | "follow") => {
+      if (!sessionId) return;
+      try {
+        const r = await fetch(`/api/sessions/${sessionId}/approval-policy`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ policy }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error ?? "设置审批策略失败");
+        setPolicyOpen(false);
+        await refreshSessions();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [sessionId, refreshSessions],
+  );
+
   /** 读取图片文件并加入待发送附件（校验 MIME 与大小，上限 10MB） */
   const addImageFiles = useCallback((files: File[] | FileList) => {
     const ALLOWED = new Set([
@@ -3758,6 +3783,78 @@ export function ChatPanel() {
                             </svg>
                             自定义
                             <span className="toolbar-dropdown-hint">细粒度配置</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {/* 会话级审批策略下拉 */}
+                  <div className="toolbar-dropdown">
+                    <button
+                      type="button"
+                      className={`toolbar-dropdown-btn${sessionPolicy === "never" ? " dangerous" : ""}`}
+                      onClick={() => setPolicyOpen((v) => !v)}
+                      title={
+                        sessionPolicy === "never"
+                          ? "本会话审批策略：never（敏感操作自动拒绝，不弹审批卡）"
+                          : sessionPolicy === "ask"
+                            ? "本会话审批策略：ask（敏感操作照常询问）"
+                            : "本会话审批策略：跟随全局（env PRYSM_APPROVAL_POLICY 或 permission.json）"
+                      }
+                    >
+                      {sessionPolicy === "never" ? (
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 6L6 18" />
+                          <path d="M6 6l12 12" />
+                        </svg>
+                      ) : (
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                      )}
+                      <span>{sessionPolicy === "never" ? "本会话拒绝" : sessionPolicy === "ask" ? "本会话询问" : "跟随全局"}</span>
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                    {policyOpen && (
+                      <>
+                        <div className="toolbar-dropdown-backdrop" onClick={() => setPolicyOpen(false)} />
+                        <div className="toolbar-dropdown-menu">
+                          <button
+                            type="button"
+                            className={`toolbar-dropdown-item${!sessionPolicy ? " active" : ""}`}
+                            onClick={() => void applySessionApprovalPolicy("follow")}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" />
+                              <path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" />
+                            </svg>
+                            跟随全局
+                            <span className="toolbar-dropdown-hint">env 或 permission.json 决定</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`toolbar-dropdown-item${sessionPolicy === "ask" ? " active" : ""}`}
+                            onClick={() => void applySessionApprovalPolicy("ask")}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            </svg>
+                            本会话询问
+                            <span className="toolbar-dropdown-hint">敏感操作照常弹审批卡</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`toolbar-dropdown-item${sessionPolicy === "never" ? " active" : ""}`}
+                            onClick={() => void applySessionApprovalPolicy("never")}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M18 6L6 18" />
+                              <path d="M6 6l12 12" />
+                            </svg>
+                            本会话拒绝
+                            <span className="toolbar-dropdown-hint">敏感操作自动拒绝，不弹卡</span>
                           </button>
                         </div>
                       </>

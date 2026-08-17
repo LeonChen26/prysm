@@ -253,6 +253,8 @@ export interface SessionInfo {
   surface?: "work" | "coding";
   /** 绑定的工作目录（Coding 创建时确定；undefined = 使用默认 agent-workdir，绑定后不可重选） */
   workdir?: string;
+  /** 会话级审批策略覆盖（ask/never；undefined = 跟随全局） */
+  approvalPolicy?: "ask" | "never";
 }
 
 /** 上下文构成的单个分类（GET /api/context 返回） */

@@ -22,6 +22,8 @@ import {
   restoreAllSessions,
   saveSessionMessages,
   searchSessionMessages,
+  getSessionApprovalPolicy,
+  setSessionApprovalPolicy,
 } from "../../lib/session";
 
 function fail(msg: string): never {
@@ -245,6 +247,10 @@ async function main() {
   console.log(`  ✓ 搜索命中 ${hits.length} 条，软删过滤生效`);
 
   console.log("\n== dumpAllSessions / restoreAllSessions 往返 ==");
+  // 给 sCode 设置会话级审批策略，验证导出-恢复保留
+  if (getSessionApprovalPolicy(sCode.id) !== undefined) fail("sCode 初始应无审批策略覆盖");
+  setSessionApprovalPolicy(sCode.id, "never");
+  if (getSessionApprovalPolicy(sCode.id) !== "never") fail("设置会话策略 never 失败");
   const dump = dumpAllSessions();
   if (dump.sessions.length < 2) fail(`应至少有 2 个会话可导出，实际 ${dump.sessions.length}`);
   if (!dump.messagesBySession[sCode.id]) fail("导出应包含 sCode 的消息");
@@ -258,10 +264,13 @@ async function main() {
   if (restoredCount !== dump.sessions.length) fail("恢复的会话数与导出不一致");
   const restoredSessions = listSessions();
   if (restoredSessions.length !== dump.sessions.length) fail("恢复后会话数不匹配");
-  // 验证 workdir / surface 保留
+  // 验证 workdir / surface / approvalPolicy 保留
   const restoredCode = getSession(sCode.id);
   if (!restoredCode || restoredCode.workdir !== "/project/my-app" || restoredCode.surface !== "coding") {
     fail("恢复后 workdir/surface 未保留");
+  }
+  if (getSessionApprovalPolicy(sCode.id) !== "never") {
+    fail("恢复后 approvalPolicy 未保留");
   }
   const restoredMsgs = getSessionMessages(sCode.id);
   if (restoredMsgs.length !== 5) fail(`恢复后消息数应为 5，实际 ${restoredMsgs.length}`);

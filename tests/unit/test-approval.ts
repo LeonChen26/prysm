@@ -11,6 +11,12 @@ import {
   subscribeApprovalLifecycle,
   subscribeApprovals,
 } from "../../lib/approval";
+import {
+  createSession,
+  deleteSession,
+  getSessionApprovalPolicy,
+  setSessionApprovalPolicy,
+} from "../../lib/session";
 
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);
@@ -169,6 +175,55 @@ async function main() {
   expectEq("never 不残留 pending", listPendingApprovals().some((x) => x.id === "n1"), false);
   unsubNever();
   delete process.env.PRYSM_APPROVAL_POLICY;
+
+  console.log("\n== 会话级审批策略覆盖（per-session） ==");
+  const s = createSession("策略测试");
+  const ssid = s.id;
+  expectEq("默认无覆盖（跟随全局）", getSessionApprovalPolicy(ssid), undefined);
+  expectEq("设置会话为 never", setSessionApprovalPolicy(ssid, "never"), true);
+  expectEq("读取会话策略为 never", getSessionApprovalPolicy(ssid), "never");
+  const psEvents: string[] = [];
+  const unsubPs = subscribeApprovalLifecycle((e) => {
+    if (e.type === "notice") psEvents.push(`notice:${e.toolName}:${e.reason}`);
+    if (e.type === "required") psEvents.push(`required:${e.state.id}`);
+  });
+  const pNeverS = requestApproval({
+    id: "n2",
+    toolName: "write_file",
+    args: { path: "x.txt" },
+    sessionId: ssid,
+  });
+  expectEq("会话 never 立即返回 false", await pNeverS, false);
+  expectEq(
+    "会话 never 不弹卡 + notice 标注会话策略",
+    psEvents.join("|"),
+    "notice:write_file:会话审批策略为 never，操作被确定性拒绝",
+  );
+  unsubPs();
+  expectEq("会话 never 不残留 pending", listPendingApprovals().some((x) => x.id === "n2"), false);
+  // 恢复 ask：同会话敏感操作应重新弹卡并可确认
+  expectEq("会话恢复为 ask", setSessionApprovalPolicy(ssid, "ask"), true);
+  const pAsk = requestApproval({
+    id: "n3",
+    toolName: "write_file",
+    args: { path: "x.txt" },
+    sessionId: ssid,
+  });
+  expectEq("会话 ask 弹卡并等待确认", resolveApproval("n3", true), true);
+  expectEq("会话 ask 放行", await pAsk, true);
+  // 清除覆盖 → 跟随全局
+  expectEq("清除会话覆盖", setSessionApprovalPolicy(ssid, null), true);
+  expectEq("清除后无覆盖", getSessionApprovalPolicy(ssid), undefined);
+  // 不存在的会话 id：requestApproval 无覆盖，回退全局
+  const pNoS = requestApproval({
+    id: "n4",
+    toolName: "write_file",
+    args: {},
+    sessionId: "no-such-session",
+  });
+  expectEq("无覆盖会话按全局 ask 弹卡", resolveApproval("n4", true), true);
+  expectEq("无覆盖会话放行", await pNoS, true);
+  deleteSession(ssid);
 
   console.log("\n✓ 工具审批流验证通过");
 }

@@ -29,6 +29,8 @@ export interface SessionInfo {
   surface: Surface;
   /** 绑定的工作目录（创建时确定；undefined = 使用默认 agent-workdir） */
   workdir?: string;
+  /** 会话级审批策略覆盖（ask/never；undefined = 跟随全局：env 或 permission.json） */
+  approvalPolicy?: "ask" | "never";
 }
 
 let db: DatabaseSync | undefined;
@@ -64,6 +66,9 @@ function getDb(): DatabaseSync {
   if (!cols.some((c) => c.name === "workdir")) {
     d.exec("ALTER TABLE sessions ADD COLUMN workdir TEXT");
   }
+  if (!cols.some((c) => c.name === "approval_policy")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN approval_policy TEXT");
+  }
   // 旧库迁移：消息软删标记列（deleted=1 的消息从读取视图隐藏，行保留可追溯）
   const mcols = d
     .prepare("PRAGMA table_info(session_messages)")
@@ -86,6 +91,10 @@ function rowToSession(row: Record<string, unknown>): SessionInfo {
     pinned: Number(row.pinned ?? 0),
     surface: row.surface === "work" ? "work" : "coding",
     workdir: typeof row.workdir === "string" && row.workdir ? row.workdir : undefined,
+    approvalPolicy:
+      row.approval_policy === "ask" || row.approval_policy === "never"
+        ? row.approval_policy
+        : undefined,
   };
 }
 
@@ -136,6 +145,32 @@ export function pinSession(id: string, pinned: boolean): void {
     pinned ? 1 : 0,
     id,
   );
+}
+
+/** 会话级审批策略（ask/never；null 清除覆盖，跟随全局）。返回是否更新成功 */
+export function setSessionApprovalPolicy(
+  id: string,
+  policy: "ask" | "never" | null,
+): boolean {
+  const d = getDb();
+  const r = d
+    .prepare("UPDATE sessions SET approval_policy = ? WHERE id = ?")
+    .run(policy, id);
+  return Number(r.changes) > 0;
+}
+
+/** 读取会话级审批策略覆盖（undefined = 未覆盖，跟随全局） */
+export function getSessionApprovalPolicy(
+  id: string,
+): "ask" | "never" | undefined {
+  const d = getDb();
+  const row = d
+    .prepare("SELECT approval_policy FROM sessions WHERE id = ?")
+    .get(id) as { approval_policy: string | null } | undefined;
+  if (!row) return undefined;
+  return row.approval_policy === "ask" || row.approval_policy === "never"
+    ? row.approval_policy
+    : undefined;
 }
 
 /** 清空会话消息（保留会话本身，标题不变） */
@@ -331,7 +366,7 @@ export function restoreAllSessions(
     d.exec("DELETE FROM session_messages");
     d.exec("DELETE FROM sessions");
     const insS = d.prepare(
-      "INSERT INTO sessions (id, title, created_at, updated_at, pinned, surface, workdir) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO sessions (id, title, created_at, updated_at, pinned, surface, workdir, approval_policy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     );
     const insM = d.prepare(
       "INSERT INTO session_messages (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
@@ -345,6 +380,7 @@ export function restoreAllSessions(
         s.pinned ?? 0,
         s.surface ?? "coding",
         s.workdir ?? null,
+        s.approvalPolicy ?? null,
       );
       for (const m of messagesBySession[s.id] ?? []) {
         insM.run(s.id, m.role, JSON.stringify(m), m.timestamp ?? Date.now());
