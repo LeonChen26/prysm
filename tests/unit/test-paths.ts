@@ -282,6 +282,20 @@ async function main() {
     if (!r.ok) expectEq("读 .db reason=sensitive", r.reason, "sensitive");
   }
   {
+    // 读：凭据文件（.npmrc 常含明文 _authToken）拒绝
+    fs.writeFileSync(path.join(outsideDir, ".npmrc"), "//registry.npmjs.org/:_authToken=secret");
+    const r = paths.resolveInWorkspace(outsideDir + "/.npmrc", readPolicy, "read");
+    expectTrue("读 .npmrc ok=false", !r.ok);
+    if (!r.ok) expectEq("读 .npmrc reason=sensitive", r.reason, "sensitive");
+  }
+  {
+    // 读：私钥文件（*.key）拒绝
+    fs.writeFileSync(path.join(outsideDir, "server.key"), "PRIVATE KEY");
+    const r = paths.resolveInWorkspace(outsideDir + "/server.key", readPolicy, "read");
+    expectTrue("读 server.key ok=false", !r.ok);
+    if (!r.ok) expectEq("读 server.key reason=sensitive", r.reason, "sensitive");
+  }
+  {
     // 写：外部路径仍拒绝（读放开不影响写）
     const r = paths.resolveInWorkspace(outsideDir + "/external.txt", writePolicy, "write");
     expectTrue("写外部绝对路径 ok=false", !r.ok);

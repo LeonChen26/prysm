@@ -94,6 +94,12 @@ const PROTECTED_PATH_RES: { re: RegExp; label: string }[] = [
   { re: /(^|\/)\.aws\//, label: "云凭证" },
   { re: /(package-lock|pnpm-lock|yarn)\.(json|yaml)$/, label: "依赖锁文件" },
   { re: /\.(db|sqlite|sqlite3)$/, label: "数据库文件" },
+  // 凭据类文件与私钥（读放开兜底：这些文件常含明文 token / 私钥，只读也不应放行）
+  { re: /(^|\/)\.(npmrc|yarnrc|pypirc|netrc|git-credentials|gitconfig|hgrc)$/, label: "凭据文件" },
+  { re: /(^|\/)\.(bash_history|zsh_history|fish_history|psql_history|mysql_history)$/, label: "命令历史" },
+  { re: /(^|\/)\.kube\//, label: "Kubernetes 配置" },
+  { re: /(^|\/)\.docker\//, label: "Docker 凭据" },
+  { re: /\.(pem|key|p12|pfx|ppk)$/, label: "私钥文件" },
 ];
 
 function maxLevel(a: RiskLevel, b: RiskLevel): RiskLevel {
