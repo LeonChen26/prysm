@@ -21,6 +21,7 @@ import {
   matchMcpRule,
   ensurePermissionFile,
   getFileApprovalTimeoutMs,
+  getApprovalPolicy,
   type PermissionConfig,
 } from "../../lib/permission";
 import { parseGuardianOutput } from "../../lib/guardian";
@@ -131,6 +132,60 @@ expectEq(
 expectEq("deny 解析", parseGuardianOutput('{"allow":false}')?.allow, false);
 expectEq("非法 JSON → null", parseGuardianOutput("无法解析"), null);
 expectEq("allow 非布尔 → null", parseGuardianOutput('{"allow":"yes"}'), null);
+
+console.log("\n== getApprovalPolicy（环境变量优先 > config 文件） ==");
+{
+  // 默认配置 approvalPolicy = "ask"
+  reloadPermission();
+  expectEq("默认 approvalPolicy=ask", getApprovalPolicy(), "ask");
+
+  // config 设置为 never
+  const cfg = getPermission();
+  cfg.approvalPolicy = "never";
+  savePermission(cfg);
+  reloadPermission();
+  expectEq("config approvalPolicy=never", getApprovalPolicy(), "never");
+
+  // 环境变量 ask 覆盖 config never
+  process.env.PRYSM_APPROVAL_POLICY = "ask";
+  expectEq("env=ask 覆盖 config=never", getApprovalPolicy(), "ask");
+
+  // 环境变量 never 覆盖 config ask
+  process.env.PRYSM_APPROVAL_POLICY = "never";
+  expectEq("env=never 覆盖 config=ask", getApprovalPolicy(), "never");
+
+  // 环境变量为非法值 → 回退 config
+  process.env.PRYSM_APPROVAL_POLICY = "invalid";
+  reloadPermission();
+  expectEq("非法 env 值回退 config", getApprovalPolicy(), "never");
+
+  // 环境变量为空 → 回退 config
+  process.env.PRYSM_APPROVAL_POLICY = "";
+  reloadPermission();
+  expectEq("空 env 回退 config", getApprovalPolicy(), "never");
+
+  // 删除环境变量 → 使用 config
+  delete process.env.PRYSM_APPROVAL_POLICY;
+  reloadPermission();
+  expectEq("无 env 回退 config", getApprovalPolicy(), "never");
+
+  // 清理：恢复默认
+  const reset = getPermission();
+  reset.approvalPolicy = "ask";
+  savePermission(reset);
+  reloadPermission();
+}
+
+console.log("\n== approvalPolicy 配置归一化（normalizeConfig） ==");
+{
+  // 缺少 approvalPolicy 字段 → 使用默认 ask
+  const rawNoPolicy = { activeMode: "manual" };
+  reloadPermission();
+  const cfg1 = getPermission();
+  // 验证默认值
+  if (cfg1.approvalPolicy !== "ask") fail(`默认 approvalPolicy 应为 ask，实际 ${cfg1.approvalPolicy}`);
+  console.log(`  ✓ 缺省 approvalPolicy 默认 ask`);
+}
 
 // 清理临时目录
 fs.rmSync(tmp, { recursive: true, force: true });
