@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { exec } from "node:child_process";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createTodos, formatTodos, listTodos, modifyTodos, type TodoUpdate } from "./todo";
@@ -21,9 +20,19 @@ import {
 } from "./preference-memory";
 import { createAutomation } from "./automation";
 import { parseCron } from "./cron";
+import { findInWorkdir, searchInWorkdir } from "./file-search";
+import { buildEditDiff, checkPort, countNewlines, runCommand } from "./tool-helpers";
 
 // re-export 兼容历史导入（测试脚本从 lib/tools 引入 AGENT_WORKDIR）
 export { AGENT_WORKDIR, ALLOWED_ROOTS } from "./paths";
+
+// re-export 兼容历史导入（测试脚本从 lib/tools 引入以下 helper）
+export {
+  buildEditDiff,
+  countNewlines,
+  globPathToRegex,
+  globToRegex,
+} from "./tool-helpers";
 
 /**
  * spawn_subagent 执行器（Phase 5 延迟注入打破 tools↔agent 循环依赖）。
@@ -111,273 +120,6 @@ function resolveToolPath(relative: string, op: FileOp, root?: string): string {
     throw new Error(`路径受保护: "${relative}" 命中受保护路径（${r.label ?? "敏感文件"}），只读访问被拒绝`);
   }
   throw new Error(`路径越界: "${relative}" 不在可访问的工作区根内`);
-}
-
-interface FileHit {
-  path: string;
-  line: number;
-  text: string;
-  context?: string; // 前后文行，增强版新增
-}
-
-/** 文件名通配（支持 * 和 ?）转正则 */
-export function globToRegex(pattern: string): RegExp | null {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*")
-    .replace(/\?/g, ".");
-  try {
-    return new RegExp(`^${escaped}$`, "i");
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 路径级 glob 转正则（按文件名查找）：
- * - `**` 匹配跨任意层级目录
- * - `*`  匹配单段（不含 /）
- * - `?`  匹配单个字符（不含 /）
- * pattern 不含 "/" 时视为匹配任意层级下的文件名（自动补全局前缀）。
- */
-export function globPathToRegex(pattern: string): RegExp | null {
-  let full = pattern;
-  if (!full.includes("/")) full = `**/${full}`;
-  const escaped = full
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "\u0000") // 占位，避免被 * 规则拆开
-    .replace(/\*/g, "[^/]*")
-    .replace(/\?/g, "[^/]")
-    .replace(/\u0000/g, ".*");
-  try {
-    return new RegExp(`^${escaped}$`, "i");
-  } catch {
-    return null;
-  }
-}
-
-/** 按文件名 glob 在工作区内递归查找文件（限制深度/数量，跳过常见无关目录） */
-async function findInWorkdir(
-  pattern: string,
-  subPath: string | undefined,
-  limit: number,
-): Promise<{ path: string; size: number }[]> {
-  const re = globPathToRegex(pattern);
-  if (!re) throw new Error(`无效的 glob 模式: ${pattern}`);
-  const root = resolveToolPath(subPath ?? "", "read");
-  const stat = await fs.stat(root);
-  if (!stat.isDirectory()) throw new Error(`不是目录: ${subPath ?? ""}`);
-  const hits: { path: string; size: number }[] = [];
-  const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build"]);
-  const walk = async (dir: string) => {
-    if (hits.length >= limit) return;
-    let entries;
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (hits.length >= limit) return;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name)) continue;
-        await walk(full);
-      } else if (e.isFile()) {
-        const rel = path.relative(effectiveWorkdir(), full).replace(/\\/g, "/");
-        if (re.test(rel)) {
-          const size = (await fs.stat(full)).size;
-          hits.push({ path: rel, size });
-        }
-      }
-    }
-  };
-  await walk(root);
-  return hits;
-}
-
-/** 在工作区内递归搜索关键词（限制单文件大小，跳过常见无关目录） */
-async function searchInWorkdir(
-  query: string,
-  pattern: string | undefined,
-  limit: number,
-  ignoreCase = false,
-  context = 0,
-): Promise<FileHit[]> {
-  const hits: FileHit[] = [];
-  const re = pattern ? globToRegex(pattern) : null;
-  const q = ignoreCase ? query.toLowerCase() : query;
-  const MAX_FILE_BYTES = 1024 * 1024; // 跳过 1MB 以上大文件
-  const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build"]);
-
-  const walk = async (dir: string) => {
-    if (hits.length >= limit) return;
-    let entries;
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (hits.length >= limit) return;
-      if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name)) continue;
-        await walk(path.join(dir, e.name));
-      } else if (e.isFile()) {
-        if (re && !re.test(e.name)) continue;
-        const full = path.join(dir, e.name);
-        try {
-          const stat = await fs.stat(full);
-          if (stat.size > MAX_FILE_BYTES) continue;
-          const text = await fs.readFile(full, "utf-8");
-          const lines = text.split("\n");
-          for (let i = 0; i < lines.length; i++) {
-            const lineText = ignoreCase ? lines[i].toLowerCase() : lines[i];
-            if (lineText.includes(q)) {
-              let ctx: string | undefined;
-              if (context > 0) {
-                const start = Math.max(0, i - context);
-                const end = Math.min(lines.length, i + context + 1);
-                ctx = lines
-                  .slice(start, end)
-                  .map((l, k) => {
-                    const n = start + k + 1;
-                    return `${n === i + 1 ? ">" : " "}${n}: ${l.slice(0, 200)}`;
-                  })
-                  .join("\n");
-              }
-              hits.push({
-                path: path.relative(effectiveWorkdir(), full).replace(/\\/g, "/"),
-                line: i + 1,
-                text: lines[i].slice(0, 200),
-                context: ctx,
-              });
-              if (hits.length >= limit) return;
-            }
-          }
-        } catch {
-          /* 二进制或读取失败则跳过 */
-        }
-      }
-    }
-  };
-
-  await walk(effectiveWorkdir());
-  return hits;
-}
-
-/** 统计字符串中的换行数（用于定位 old_string / new_string 的行号） */
-export function countNewlines(s: string): number {
-  let n = 0;
-  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 10) n++;
-  return n;
-}
-
-/**
- * 生成行级 unified diff 文本（单 hunk：替换区间 + 前后 3 行上下文）。
- * 供 edit_file 展示精准变更，便于模型/用户核对改动是否符合预期。
- *
- * @param relPath  相对路径（用于 --- / +++ 头）
- * @param oldLines 原文件按行拆分
- * @param newLines 替换后文件按行拆分
- * @param oldStartLine old_string 首行（0 基）
- * @param oldEndLine   old_string 尾行（0 基）
- * @param newEndLine   new_string 尾行（0 基，相对 newLines）
- */
-export function buildEditDiff(
-  relPath: string,
-  oldLines: string[],
-  newLines: string[],
-  oldStartLine: number,
-  oldEndLine: number,
-  newEndLine: number,
-): string {
-  const CTX = 3;
-  const hs = Math.max(0, oldStartLine - CTX);
-  const he = Math.min(oldLines.length, oldEndLine + 1 + CTX);
-  const oldAffected = oldEndLine - oldStartLine + 1;
-  const newAffected = newEndLine - oldStartLine + 1;
-  const oldCount = he - hs;
-  const newCount = oldCount - oldAffected + newAffected;
-  const out: string[] = [
-    `--- a/${relPath}`,
-    `+++ b/${relPath}`,
-    `@@ -${hs + 1},${oldCount} +${hs + 1},${newCount} @@`,
-  ];
-  for (let i = hs; i < oldStartLine; i++) out.push(` ${oldLines[i]}`);
-  for (let i = oldStartLine; i <= oldEndLine; i++) out.push(`-${oldLines[i]}`);
-  for (let i = oldStartLine; i <= newEndLine; i++) out.push(`+${newLines[i]}`);
-  for (let i = oldEndLine + 1; i < he; i++) out.push(` ${oldLines[i]}`);
-  return out.join("\n");
-}
-
-interface CommandResult {
-  exitCode: number;
-  output: string;
-}
-
-/** 在指定目录执行 shell 命令（超时后终止，输出截断到 8000 字符） */
-function runCommand(
-  command: string,
-  cwd: string,
-  timeoutMs = 30_000,
-): Promise<CommandResult> {
-  return new Promise((resolve) => {
-    exec(
-      command,
-      { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
-      (err, stdout, stderr) => {
-        const output = [stdout, stderr].filter(Boolean).join("\n");
-        const exitCode = err
-          ? (err as { code?: number }).code ?? -1
-          : 0;
-        resolve({ exitCode, output });
-      },
-    );
-  });
-}
-
-/** 查询指定端口是否被占用，返回人类可读的结果（跨平台） */
-async function checkPort(port: number): Promise<string> {
-  if (process.platform === "win32") {
-    const r = await runCommand("netstat -ano", process.cwd(), 10_000);
-    if (r.exitCode !== 0) return `查询失败: ${r.output}`;
-    const re = new RegExp(`:${port}\\s`);
-    const lines = r.output
-      .split("\n")
-      .filter((l) => re.test(l) && /LISTENING/i.test(l));
-    if (lines.length === 0) return `端口 ${port} 未被占用`;
-    const pids = new Set<string>();
-    for (const l of lines) {
-      const m = l.trim().match(/(\d+)\s*$/);
-      if (m) pids.add(m[1]);
-    }
-    const names: string[] = [];
-    for (const pid of pids) {
-      const t = await runCommand(
-        `tasklist /FI "PID eq ${pid}" /FO CSV /NH`,
-        process.cwd(),
-        10_000,
-      );
-      const m = t.output.match(/"([^"]+)"/);
-      names.push(m ? `${m[1]} (PID ${pid})` : `PID ${pid}`);
-    }
-    return (
-      `端口 ${port} 被占用（${lines.length} 个监听项）：\n` +
-      lines.slice(0, 8).join("\n") +
-      `\n进程: ${names.join("、") || "未知"}`
-    );
-  }
-  // macOS / Linux
-  const r = await runCommand(
-    `lsof -i :${port} -P -n 2>/dev/null || true`,
-    process.cwd(),
-    10_000,
-  );
-  if (r.exitCode === 0 && r.output.trim()) {
-    return `端口 ${port} 占用情况:\n${r.output}`;
-  }
-  return `端口 ${port} 未被占用`;
 }
 
 /**
@@ -655,7 +397,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "verify_file",
-    label: "校验文件",
+    label: TOOL_META["verify_file"].label,
     description:
       "自检工具：检查工作区内文件是否存在、返回大小与内容预览（前 200 字符）。提供 expect 参数时，同时检查内容是否包含该片段并返回校验通过/失败。任务完成后用它验证交付物，不要仅口头声称完成。",
     parameters: Type.Object({
@@ -739,7 +481,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "todo_modify",
-    label: "更新任务计划",
+    label: TOOL_META["todo_modify"].label,
     description:
       "更新任务清单：按 id 修改子任务状态（pending/in_progress/completed/cancelled）或标题，也可以追加新的子任务。",
     parameters: Type.Object({
@@ -779,7 +521,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "todo_list",
-    label: "查看任务计划",
+    label: TOOL_META["todo_list"].label,
     description: "列出当前任务清单及各子任务状态。",
     parameters: Type.Object({}),
     execute: async (_toolCallId) => {
@@ -792,7 +534,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "web_search",
-    label: "网页搜索",
+    label: TOOL_META["web_search"].label,
     description:
       "搜索互联网获取实时信息（最新新闻、文档、数据等）。返回标题、URL 和摘要列表。当需要最新信息、或问题超出你的知识范围（如时事、价格、版本号）时使用。",
     parameters: Type.Object({
@@ -865,7 +607,12 @@ export const tools: AgentTool<any>[] = [
     }),
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
-      const hits = await searchInWorkdir(params.query, params.pattern, params.limit ?? 20);
+      const hits = await searchInWorkdir(
+        params.query,
+        params.pattern,
+        params.limit ?? 20,
+        effectiveWorkdir(),
+      );
       if (hits.length === 0) {
         return {
           content: [
@@ -912,7 +659,13 @@ export const tools: AgentTool<any>[] = [
     execute: async (_toolCallId, _params) => {
       const params = _params as ToolArgs;
       if (!params.pattern) throw new Error("find 缺少必需参数 pattern");
-      const hits = await findInWorkdir(params.pattern, params.path, params.limit ?? 20);
+      const root = resolveToolPath(params.path ?? "", "read");
+      const hits = await findInWorkdir(
+        params.pattern,
+        root,
+        params.limit ?? 20,
+        effectiveWorkdir(),
+      );
       if (hits.length === 0) {
         return {
           content: [
@@ -962,7 +715,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "env_info",
-    label: "环境信息",
+    label: TOOL_META["env_info"].label,
     description:
       "查看当前运行环境信息：操作系统与架构、Node 版本、进程运行时长与内存占用、工作区（agent-workdir）路径和白名单目录。用于排查环境相关问题时快速了解 Agent 的运行上下文。",
     parameters: Type.Object({}),
@@ -1007,7 +760,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "spawn_subagent",
-    label: "派生子 agent",
+    label: TOOL_META["spawn_subagent"].label,
     description:
       "派生一个独立的子 agent 并行完成子任务（只读研究型可读文件/搜索，读写执行型可修改文件）。子 agent 上下文与主会话隔离，完成后只返回摘要。适合将可并行的独立子任务委派出去。",
     parameters: Type.Object({
@@ -1071,7 +824,7 @@ export const tools: AgentTool<any>[] = [
   },
   {
     name: "plan_propose",
-    label: "提出执行计划",
+    label: TOOL_META["plan_propose"].label,
     description:
       "在执行一项复杂任务前，先产出结构化计划（步骤 + 涉及工具 + 预期）并等待用户确认。计划提交后本调用会阻塞，直到用户在界面确认或拒绝；批准后继续执行，拒绝则根据反馈调整。适合多步骤、可能改动文件或调用外部工具的任务。",
     parameters: Type.Object({
